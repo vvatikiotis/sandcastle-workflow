@@ -218,7 +218,17 @@ const isDryRun = command === "dry-run";
 
 if (command === "init") {
   const result = await initializeProject(projectRoot);
-  reportInitialization(result, projectRoot);
+  reportInitialization(
+    result,
+    projectRoot,
+    projectPath(
+      "node_modules",
+      "@vvatikiotis",
+      "sandcastle-workflow",
+      "skills",
+      "github-ticket-relationships"
+    )
+  );
   runCompletion.setStatus({
     kind: "completed",
     reason: `Initialized project-local Sandcastle configuration at ${projectRoot}.`,
