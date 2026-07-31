@@ -4,7 +4,7 @@ This guide explains how to install and run `@vvatikiotis/sandcastle-workflow` in
 
 ## Supported environment
 
-Version `0.1.0` supports:
+Version `0.1.1` supports:
 
 - Node.js 22 or newer on macOS and Linux
 - npm 10 or pnpm 11 repositories
@@ -19,19 +19,19 @@ The package is local-only. Consumers commit a reviewed tarball under `vendor/` a
 Copy the artifact into the consuming repository:
 
 ```text
-vendor/vvatikiotis-sandcastle-workflow-0.1.0.tgz
+vendor/vvatikiotis-sandcastle-workflow-0.1.1.tgz
 ```
 
 With pnpm:
 
 ```bash
-pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.1.0.tgz
+pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.1.1.tgz
 ```
 
 With npm:
 
 ```bash
-npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.1.0.tgz
+npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.1.1.tgz
 ```
 
 The relative file dependency keeps clean installs independent of an adjacent package checkout. Commit the tarball, package manifest, and lockfile together. Initialization never edits consumer package metadata.
@@ -125,7 +125,7 @@ Native GitHub relationships determine all executable work:
 - one specification is selected per invocation;
 - final review runs only after every direct child closes.
 
-Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.1.0` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
+Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.1.1` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
 
 The package includes the optional Agent Skills-standard `github-ticket-relationships` skill. Configure it project-locally before asking an agent to publish tickets. For harnesses that discover `.agents/skills`, commit a relative symbolic link from `.agents/skills/github-ticket-relationships` to the installed package's skill directory. Initialization prints the installed source path but does not create the link or modify agent settings.
 
