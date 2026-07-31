@@ -24,7 +24,7 @@ import { after, before, describe, it } from "node:test";
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageName = "@vvatikiotis/sandcastle-workflow";
-const packageVersion = "0.1.1";
+const packageVersion = "0.2.0";
 const validRunnerConfig = [
   "IMPLEMENTER_MODEL=test-model",
   "IMPLEMENTER_EFFORT=low",
@@ -324,6 +324,7 @@ describe("packed CLI", () => {
       "package/dist/defaults/prompts/standalone-implement-prompt.md",
       "package/dist/defaults/prompts/standalone-merge-prompt.md",
       "package/dist/defaults/prompts/standalone-review-prompt.md",
+      "package/dist/setup.sh",
       "package/package.json",
       "package/skills/github-ticket-relationships/SKILL.md",
     ].sort();
@@ -373,7 +374,10 @@ describe("packed CLI", () => {
       "package/package.json",
     ]);
     const manifest = JSON.parse(manifestText);
-    assert.deepEqual(manifest.bin, { "sandcastle-workflow": "dist/cli.js" });
+    assert.deepEqual(manifest.bin, {
+      "sandcastle-workflow": "dist/cli.js",
+      "sandcastle-workflow-setup": "dist/setup.sh",
+    });
     assert.equal("pi" in manifest, false);
   });
 
@@ -442,6 +446,97 @@ describe("packed CLI", () => {
     assert.equal(await readFile(examplePath, "utf8"), "project-owned\n");
   });
 
+  it("runs guided setup from the packed consumer", async () => {
+    const consumerRoot = await installConsumer("pnpm-setup");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const setup = path.join(
+      consumerRoot,
+      "node_modules",
+      ".bin",
+      "sandcastle-workflow-setup"
+    );
+
+    const shadowBin = path.join(consumerRoot, "shadow-bin");
+    const shadowMarker = path.join(consumerRoot, "shadow-cli-ran");
+    await mkdir(shadowBin);
+    await writeFile(
+      path.join(shadowBin, "sandcastle-workflow"),
+      `#!/bin/sh\nprintf '%s\\n' shadowed > "${shadowMarker}"\nexit 97\n`
+    );
+    await chmod(path.join(shadowBin, "sandcastle-workflow"), 0o755);
+
+    await run(
+      "sh",
+      ["-c", "printf 'y\\ny\\n' | \"$1\"", "setup", setup],
+      {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          PATH: `${shadowBin}:${process.env.PATH ?? ""}`,
+        },
+      }
+    );
+
+    await assert.rejects(access(shadowMarker));
+    await access(path.join(consumerRoot, ".sandcastle", "sandcastle.env"));
+    await access(path.join(consumerRoot, ".sandcastle", ".env"));
+  });
+
+  it("does not leave partial configuration when input ends", async () => {
+    const consumerRoot = await installConsumer("pnpm-setup-eof");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const setup = path.join(
+      consumerRoot,
+      "node_modules",
+      ".bin",
+      "sandcastle-workflow-setup"
+    );
+
+    await assert.rejects(
+      run("sh", ["-c", "printf 'y\\n' | \"$1\"", "setup", setup], {
+        cwd: consumerRoot,
+      }),
+      (error) => {
+        assert.match(error.stderr, /Input ended; setup aborted/);
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      access(path.join(consumerRoot, ".sandcastle", "sandcastle.env"))
+    );
+    await assert.rejects(
+      access(path.join(consumerRoot, ".sandcastle", ".env"))
+    );
+  });
+
+  it("rejects a symbolic active configuration path", async () => {
+    const consumerRoot = await installConsumer("pnpm-setup-symlink");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
+    await mkdir(sandcastleRoot);
+    const outsideTarget = path.join(consumerRoot, "outside-env");
+    await symlink(outsideTarget, path.join(sandcastleRoot, ".env"));
+    const setup = path.join(
+      consumerRoot,
+      "node_modules",
+      ".bin",
+      "sandcastle-workflow-setup"
+    );
+
+    await assert.rejects(
+      run("sh", ["-c", "printf 'n\\n' | \"$1\"", "setup", setup], {
+        cwd: consumerRoot,
+      }),
+      (error) => {
+        assert.match(error.stderr, /Refusing symbolic configuration path/);
+        return true;
+      }
+    );
+
+    await assert.rejects(access(outsideTarget));
+  });
+
   it("builds the versioned default Docker image from packaged defaults", async () => {
     const consumerRoot = await installConsumer("pnpm-docker");
     await run("git", ["init", "--quiet"], { cwd: consumerRoot });
@@ -471,7 +566,7 @@ describe("packed CLI", () => {
       },
     });
 
-    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.1\.1/);
+    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.2\.0/);
     assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
     assert.match(
       result.stdout,
@@ -480,7 +575,7 @@ describe("packed CLI", () => {
     const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
     const fileIndex = dockerArguments.indexOf("--file");
     const tagIndex = dockerArguments.indexOf("--tag");
-    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.1.1");
+    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.2.0");
     assert.match(dockerArguments[fileIndex + 1], /dist\/defaults\/docker\/Dockerfile$/);
     assert.equal(
       dockerArguments.at(-1),

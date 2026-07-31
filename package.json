@@ -1,6 +1,6 @@
 {
   "name": "@vvatikiotis/sandcastle-workflow",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Packaged GitHub-native Sandcastle workflow",
   "private": true,
   "license": "UNLICENSED",
@@ -10,7 +10,8 @@
     "node": ">=22"
   },
   "bin": {
-    "sandcastle-workflow": "dist/cli.js"
+    "sandcastle-workflow": "dist/cli.js",
+    "sandcastle-workflow-setup": "dist/setup.sh"
   },
   "files": [
     "dist",
