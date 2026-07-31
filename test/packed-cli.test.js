@@ -662,6 +662,14 @@ describe("packed CLI", () => {
       assert.match(error.stderr, /npm-shrinkwrap\.json is unsupported/);
       return true;
     });
+
+    await rm(path.join(consumerRoot, "npm-shrinkwrap.json"));
+    await rm(path.join(consumerRoot, "pnpm-lock.yaml"));
+    await mkdir(path.join(consumerRoot, "pnpm-lock.yaml"));
+    await assert.rejects(runDry(), (error) => {
+      assert.match(error.stderr, /pnpm-lock\.yaml must be a regular file/);
+      return true;
+    });
   });
 
   it("fails preflight when required GitHub labels are missing", async () => {
@@ -1103,6 +1111,28 @@ fi
       assert.match(error.stderr, /Refusing to initialize through symbolic Sandcastle directory/);
       return true;
     });
+    assert.deepEqual(await readdir(outsideRoot), []);
+  });
+
+  it("refuses operational commands through a symbolic Sandcastle directory", async () => {
+    const consumerRoot = await installConsumer("pnpm-runtime-symlink");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const outsideRoot = path.join(tempRoot, "outside-runtime-sandcastle");
+    await mkdir(outsideRoot);
+    await symlink(outsideRoot, path.join(consumerRoot, ".sandcastle"));
+    const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+
+    await assert.rejects(
+      run(shim, ["build-image"], { cwd: consumerRoot }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(
+          error.stderr,
+          /Refusing to run through symbolic Sandcastle directory/
+        );
+        return true;
+      }
+    );
     assert.deepEqual(await readdir(outsideRoot), []);
   });
 

@@ -32,7 +32,13 @@ async function createRepository() {
 }
 
 async function createWorktree(repositoryPath, name) {
-  const worktreePath = path.join(repositoryPath, name);
+  const worktreePath = path.join(
+    repositoryPath,
+    ".sandcastle",
+    "worktrees",
+    name
+  );
+  await mkdir(path.dirname(worktreePath), { recursive: true });
   execFileSync("git", ["branch", name], { cwd: repositoryPath });
   execFileSync("git", ["worktree", "add", "--quiet", worktreePath, name], {
     cwd: repositoryPath,

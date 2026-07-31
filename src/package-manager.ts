@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 export type SupportedPackageManager = {
@@ -39,6 +39,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function pathExists(filePath: string): Promise<boolean> {
   try {
     await access(filePath);
+    return true;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function regularFileExists(filePath: string): Promise<boolean> {
+  try {
+    const metadata = await stat(filePath);
+    if (!metadata.isFile()) {
+      throw new Error(
+        `${path.basename(filePath)} must be a regular file at the Git root.`
+      );
+    }
     return true;
   } catch (error) {
     if (
@@ -94,11 +116,15 @@ export async function resolvePackageManager(
   const manifest = parsedManifest;
   requireVerificationScripts(manifest);
 
-  const npmLockfile = await pathExists(path.join(projectRoot, "package-lock.json"));
+  const npmLockfile = await regularFileExists(
+    path.join(projectRoot, "package-lock.json")
+  );
   const npmShrinkwrap = await pathExists(
     path.join(projectRoot, "npm-shrinkwrap.json")
   );
-  const pnpmLockfile = await pathExists(path.join(projectRoot, "pnpm-lock.yaml"));
+  const pnpmLockfile = await regularFileExists(
+    path.join(projectRoot, "pnpm-lock.yaml")
+  );
   if (npmShrinkwrap) {
     throw new Error(
       "npm-shrinkwrap.json is unsupported. Use package-lock.json for an npm 10 consumer."

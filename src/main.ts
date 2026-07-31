@@ -24,7 +24,7 @@ import chalk from "chalk";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -76,6 +76,7 @@ import {
   requireProjectCodingStandards,
   resolvePromptFiles,
 } from "./prompt-resolution.ts";
+import { isWithinDirectory } from "./file-resolution.ts";
 import { initializeProject, reportInitialization } from "./initialization.ts";
 import { cleanupVerificationWorktree } from "./verification-worktree-cleanup.ts";
 import { getVerificationWorktreePaths } from "./verification-worktree-paths.ts";
@@ -241,6 +242,33 @@ if (command === "init") {
 function projectPath(...segments: string[]): string {
   return path.join(projectRoot, ...segments);
 }
+
+async function requireProjectSandcastleDirectory(): Promise<void> {
+  const sandcastleRoot = projectPath(".sandcastle");
+  let metadata;
+
+  try {
+    metadata = await lstat(sandcastleRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw new Error(`Could not inspect Sandcastle directory ${sandcastleRoot}.`, {
+      cause: error,
+    });
+  }
+
+  if (metadata.isSymbolicLink()) {
+    throw new Error(
+      `Refusing to run through symbolic Sandcastle directory ${sandcastleRoot}.`
+    );
+  }
+  if (!metadata.isDirectory()) {
+    throw new Error(`Sandcastle path ${sandcastleRoot} is not a directory.`);
+  }
+}
+
+await requireProjectSandcastleDirectory();
 
 function execFile(file: string, args: readonly string[]) {
   return rawExecFile(file, [...args], {
@@ -1028,9 +1056,29 @@ async function recoverMergerState(
   baseBranch: string,
   verificationWorktreePath: string
 ): Promise<boolean> {
+  const verificationWorktreeRoot = projectPath(
+    ".sandcastle",
+    "worktrees"
+  );
+  const resolvedVerificationWorktreePath = path.resolve(
+    verificationWorktreePath
+  );
+  if (
+    resolvedVerificationWorktreePath === verificationWorktreeRoot ||
+    !isWithinDirectory(
+      verificationWorktreeRoot,
+      resolvedVerificationWorktreePath
+    )
+  ) {
+    console.warn(
+      `WARNING: Refusing merger recovery outside ${verificationWorktreeRoot}: ${resolvedVerificationWorktreePath}.`
+    );
+    return false;
+  }
+
   try {
     const verificationRebaseAborted = await abortRebase(
-      verificationWorktreePath
+      resolvedVerificationWorktreePath
     );
     const baseCheckoutRecovered = verificationRebaseAborted
       ? await recoverBaseCheckout(baseBranch)

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   chmod,
+  mkdir,
   mkdtemp,
   readFile,
   realpath,
@@ -38,7 +39,13 @@ async function createRepository() {
 }
 
 async function createWorktree(repositoryPath, name = "verification") {
-  const worktreePath = path.join(repositoryPath, name);
+  const worktreePath = path.join(
+    repositoryPath,
+    ".sandcastle",
+    "worktrees",
+    name
+  );
+  await mkdir(path.dirname(worktreePath), { recursive: true });
   execFileSync("git", ["branch", name], { cwd: repositoryPath });
   execFileSync("git", ["worktree", "add", "--quiet", worktreePath, name], {
     cwd: repositoryPath,
@@ -106,11 +113,46 @@ describe("verification worktree cleanup", () => {
     try {
       const result = await cleanupVerificationWorktree({
         repositoryPath,
-        worktreePath: "missing-worktree",
+        worktreePath: path.join(
+          repositoryPath,
+          ".sandcastle",
+          "worktrees",
+          "missing-worktree"
+        ),
       });
 
       assert.deepEqual(result, { outcome: "already-absent" });
     } finally {
+      await rm(repositoryPath, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves worktrees outside the workflow-owned worktree directory", async () => {
+    const repositoryPath = await createRepository();
+    const worktreePath = path.join(repositoryPath, "unrelated-worktree");
+    execFileSync("git", ["branch", "unrelated"], { cwd: repositoryPath });
+    execFileSync(
+      "git",
+      ["worktree", "add", "--quiet", worktreePath, "unrelated"],
+      { cwd: repositoryPath }
+    );
+
+    try {
+      const result = await cleanupVerificationWorktree({
+        repositoryPath,
+        worktreePath,
+      });
+
+      assert.equal(result.outcome, "preserved");
+      assert.match(result.detail, /outside .*\.sandcastle\/worktrees/);
+      assert.equal(
+        registeredWorktreePaths(repositoryPath).includes(await realpath(worktreePath)),
+        true
+      );
+    } finally {
+      execFileSync("git", ["worktree", "remove", "--force", worktreePath], {
+        cwd: repositoryPath,
+      });
       await rm(repositoryPath, { recursive: true, force: true });
     }
   });
@@ -122,7 +164,7 @@ describe("verification worktree cleanup", () => {
     try {
       const result = await cleanupVerificationWorktree({
         repositoryPath,
-        worktreePath: path.basename(worktreePath),
+        worktreePath,
       });
 
       assert.deepEqual(result, { outcome: "removed" });

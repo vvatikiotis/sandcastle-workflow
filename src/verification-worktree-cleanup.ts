@@ -29,16 +29,47 @@ export async function cleanupVerificationWorktree({
 }: CleanupVerificationWorktreeOptions): Promise<VerificationWorktreeCleanupResult> {
   let resolvedRepositoryPath: string;
   let resolvedWorktreePath: string;
+  let resolvedWorkflowWorktreeRoot: string;
   try {
     resolvedRepositoryPath = await realpath(path.resolve(repositoryPath));
     resolvedWorktreePath = await canonicalizePath(
       path.resolve(resolvedRepositoryPath, worktreePath)
     );
+    const workflowWorktreeRoot = path.join(
+      resolvedRepositoryPath,
+      ".sandcastle",
+      "worktrees"
+    );
+    resolvedWorkflowWorktreeRoot = await canonicalizePath(workflowWorktreeRoot);
+    if (resolvedWorkflowWorktreeRoot !== workflowWorktreeRoot) {
+      return preservedResult(
+        resolvedWorktreePath,
+        undefined,
+        `Workflow worktree directory resolves outside ${workflowWorktreeRoot}.`
+      );
+    }
   } catch (error) {
     return preservedResult(
       path.resolve(repositoryPath, worktreePath),
       undefined,
       `Could not normalize repository and worktree paths. ${formatError(error)}`
+    );
+  }
+
+  const relativeWorktreePath = path.relative(
+    resolvedWorkflowWorktreeRoot,
+    resolvedWorktreePath
+  );
+  if (
+    relativeWorktreePath === "" ||
+    path.isAbsolute(relativeWorktreePath) ||
+    relativeWorktreePath === ".." ||
+    relativeWorktreePath.startsWith(`..${path.sep}`)
+  ) {
+    return preservedResult(
+      resolvedWorktreePath,
+      undefined,
+      `Worktree is outside ${resolvedWorkflowWorktreeRoot}.`
     );
   }
 
