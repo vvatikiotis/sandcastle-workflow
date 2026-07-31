@@ -24,7 +24,7 @@ import { after, before, describe, it } from "node:test";
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageName = "@vvatikiotis/sandcastle-workflow";
-const packageVersion = "0.1.0";
+const packageVersion = "0.1.1";
 const validRunnerConfig = [
   "IMPLEMENTER_MODEL=test-model",
   "IMPLEMENTER_EFFORT=low",
@@ -436,7 +436,7 @@ describe("packed CLI", () => {
       },
     });
 
-    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.1\.0/);
+    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.1\.1/);
     assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
     assert.match(
       result.stdout,
@@ -445,7 +445,7 @@ describe("packed CLI", () => {
     const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
     const fileIndex = dockerArguments.indexOf("--file");
     const tagIndex = dockerArguments.indexOf("--tag");
-    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.1.0");
+    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.1.1");
     assert.match(dockerArguments[fileIndex + 1], /dist\/defaults\/docker\/Dockerfile$/);
     assert.equal(
       dockerArguments.at(-1),
@@ -830,7 +830,7 @@ fi
         assert.equal(error.code, 1);
         assert.match(error.stderr, /standalone-implement-prompt\.md/);
         assert.match(error.stderr, /\{\{TEST_COMMAND\}\}/);
-        assert.match(error.stderr, /workflow version 0\.1\.0/);
+        assert.match(error.stderr, /workflow version 0\.1\.1/);
         return true;
       }
     );
