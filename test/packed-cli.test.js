@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   access,
   chmod,
@@ -10,6 +11,7 @@ import {
   readdir,
   realpath,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -83,6 +85,36 @@ async function installConsumer(manager) {
   }
 
   return consumerRoot;
+}
+
+async function fingerprintInstalledPackage(consumerRoot) {
+  const installedRoot = await realpath(
+    path.join(
+      consumerRoot,
+      "node_modules",
+      "@vvatikiotis",
+      "sandcastle-workflow"
+    )
+  );
+  const hash = createHash("sha256");
+
+  async function addDirectory(directory, relativeRoot = "") {
+    const names = (await readdir(directory)).sort();
+    for (const name of names) {
+      const absolutePath = path.join(directory, name);
+      const relativePath = path.join(relativeRoot, name);
+      const fileStats = await stat(absolutePath);
+      if (fileStats.isDirectory()) {
+        await addDirectory(absolutePath, relativePath);
+      } else if (fileStats.isFile()) {
+        hash.update(relativePath);
+        hash.update(await readFile(absolutePath));
+      }
+    }
+  }
+
+  await addDirectory(installedRoot);
+  return hash.digest("hex");
 }
 
 async function prepareDryRunConsumer(manager) {
@@ -248,19 +280,34 @@ describe("packed CLI", () => {
     const { stdout } = await run("tar", ["-tf", tarballPath]);
     const entries = stdout.trim().split("\n");
 
-    for (const required of [
-      "package/package.json",
+    const expectedEntries = [
       "package/README.md",
       "package/dist/cli.js",
       "package/dist/defaults/docker/Dockerfile",
+      "package/dist/defaults/prompts/final-spec-prompt.md",
       "package/dist/defaults/prompts/implement-prompt.md",
+      "package/dist/defaults/prompts/merge-prompt.md",
+      "package/dist/defaults/prompts/review-prompt.md",
+      "package/dist/defaults/prompts/standalone-implement-prompt.md",
+      "package/dist/defaults/prompts/standalone-merge-prompt.md",
+      "package/dist/defaults/prompts/standalone-review-prompt.md",
+      "package/package.json",
       "package/skills/github-ticket-relationships/SKILL.md",
-    ]) {
-      assert.ok(entries.includes(required), `missing packed entry ${required}`);
-    }
+    ].sort();
+    assert.deepEqual(entries.sort(), expectedEntries);
 
-    assert.equal(entries.some((entry) => entry.startsWith("package/src/")), false);
-    assert.equal(entries.some((entry) => entry.startsWith("package/test/")), false);
+    for (const forbidden of [
+      "/src/",
+      "/test/",
+      "/.env",
+      "/sandcastle.env",
+      "/logs/",
+      "/worktrees/",
+      "/node-modules-overlays/",
+      "/merger-recovery.json",
+    ]) {
+      assert.equal(entries.some((entry) => entry.includes(forbidden)), false);
+    }
 
     for (const promptName of [
       "implement-prompt.md",
@@ -307,6 +354,13 @@ describe("packed CLI", () => {
         "sandcastle-workflow",
         "dist",
         "cli.js"
+      );
+
+      await assert.rejects(
+        access(path.join(consumerRoot, "node_modules", "@daytona", "sdk"))
+      );
+      await assert.rejects(
+        access(path.join(consumerRoot, "node_modules", "@vercel", "sandbox"))
       );
 
       const help = await run(shim, ["--help"], { cwd: tempRoot });
@@ -746,6 +800,7 @@ fi
       const hookPath = await installFakeSandcastleBoundary(consumerRoot);
       const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
 
+      const packageFingerprint = await fingerprintInstalledPackage(consumerRoot);
       const result = await run(shim, [], {
         cwd: consumerRoot,
         env: {
@@ -761,6 +816,10 @@ fi
       assert.match(result.stdout, /Standalone merge complete/);
       assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
       assert.equal((await readFile(issueStatePath, "utf8")).trim(), "CLOSED");
+      assert.equal(
+        await fingerprintInstalledPackage(consumerRoot),
+        packageFingerprint
+      );
       const captures = (await readFile(capturePath, "utf8"))
         .trim()
         .split("\n")

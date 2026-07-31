@@ -318,7 +318,7 @@ async function loadRunnerConfig(): Promise<RunnerConfig> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
-        `${runnerConfigPath} is required. Run "pnpm sandcastle init", then copy .sandcastle/sandcastle.env.example to .sandcastle/sandcastle.env and choose every runner value.`
+        `${runnerConfigPath} is required. Run "sandcastle-workflow init", then copy .sandcastle/sandcastle.env.example to .sandcastle/sandcastle.env and choose every runner value.`
       );
     }
     throw error;
@@ -789,7 +789,7 @@ async function requireDockerImage(): Promise<void> {
     await execFile("docker", ["image", "inspect", dockerImageName]);
   } catch (error) {
     throw new Error(
-      `Docker image '${dockerImageName}' is not available. Build it explicitly with "pnpm sandcastle build-image", then rerun the workflow.`,
+      `Docker image '${dockerImageName}' is not available. Build it explicitly with "sandcastle-workflow build-image", then rerun the workflow.`,
       { cause: error }
     );
   }
