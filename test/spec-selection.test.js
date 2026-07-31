@@ -73,6 +73,29 @@ describe("Sandcastle native sub-issue selection", () => {
     ]);
   });
 
+  it("supports GitHub's maximum of 100 direct sub-issues", () => {
+    const children = Array.from({ length: 100 }, (_, index) => ({
+      ...readyChild,
+      id: String(200 + index),
+      title: `Child ${index + 1}`,
+    }));
+    const result = selectSpecCandidates({
+      readyIssues: [
+        readySpec,
+        ...children.map((child, index) => ({
+          id: child.id,
+          title: child.title,
+          createdAt: `2026-07-13T16:${String(index).padStart(2, "0")}:43Z`,
+          parentId: readySpec.id,
+        })),
+      ],
+      childrenByParent: new Map([[readySpec.id, children]]),
+    });
+
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.candidates[0]?.children.length, 100);
+  });
+
   it("keeps later iterations scoped to the first selected spec", () => {
     const candidates = [
       { ...readySpec, children: [readyChild] },
