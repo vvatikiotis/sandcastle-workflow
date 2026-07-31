@@ -395,6 +395,7 @@ if (command === "build-image") {
   console.log(`Docker image: ${dockerImageName}`);
   console.log(`Dockerfile: ${dockerfile.path} (${dockerfile.source})`);
   console.log(`Build context: ${dockerfile.context}`);
+  console.log(`Build arguments: AGENT_UID=${uid}, AGENT_GID=${gid}`);
   await execFile("docker", [
     "build",
     "--build-arg",
@@ -1158,14 +1159,14 @@ async function getOpenReadyIssues(): Promise<ReadyIssue[]> {
     "--label",
     "ready-for-agent",
     "--limit",
-    "100",
+    "101",
     "--json",
     "number,title,createdAt,parent",
     "--jq",
     "[.[] | {id: (.number | tostring), title, createdAt, parentId: (if .parent == null then null else (.parent.number | tostring) end)}]",
   ]);
 
-  return z
+  const readyIssues = z
     .array(
       z.object({
         id: z.string().regex(/^\d+$/),
@@ -1175,6 +1176,12 @@ async function getOpenReadyIssues(): Promise<ReadyIssue[]> {
       })
     )
     .parse(JSON.parse(stdout));
+  if (readyIssues.length > 100) {
+    throw new InvalidIssueGraphError(
+      "Sandcastle found more than 100 open ready-for-agent issues. Reduce the eligible set to the documented version 0.1.0 limit before running the workflow."
+    );
+  }
+  return readyIssues;
 }
 
 async function getNativeSubIssueDetails(issueId: string): Promise<{
@@ -2098,16 +2105,19 @@ let runSpecIssueId: string | undefined;
 let workPath: WorkPath | undefined;
 let skippedStaleStandaloneSelection = false;
 
-const staleOverlayCleanup = await cleanupStaleNodeModulesOverlays(
-  nodeModulesOverlayRoot
-);
-if (staleOverlayCleanup.preserved.length > 0) {
-  console.warn(
-    `WARNING: Preserved ${staleOverlayCleanup.preserved.length} node_modules overlay(s) with live, malformed, or unverifiable ownership.`
+if (!isDryRun) {
+  const staleOverlayCleanup = await cleanupStaleNodeModulesOverlays(
+    nodeModulesOverlayRoot
   );
+  if (staleOverlayCleanup.preserved.length > 0) {
+    console.warn(
+      `WARNING: Preserved ${staleOverlayCleanup.preserved.length} node_modules overlay(s) with live, malformed, or unverifiable ownership.`
+    );
+  }
 }
 
-if (await recoverInterruptedMerger()) {
+const recoverySucceeded = isDryRun || (await recoverInterruptedMerger());
+if (recoverySucceeded) {
   iterationLoop: for (
     let iteration = 1;
     iteration <= MAX_ITERATIONS;

@@ -536,6 +536,15 @@ describe("packed CLI", () => {
   for (const manager of ["npm-dry-run", "pnpm-dry-run"]) {
     it(`performs a read-only dry run for a valid ${manager.split("-")[0]} consumer`, async () => {
       const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(manager);
+      const staleOverlay = path.join(
+        consumerRoot,
+        ".sandcastle",
+        "node-modules-overlays",
+        "99999999-stale"
+      );
+      if (manager.startsWith("pnpm")) {
+        await mkdir(staleOverlay, { recursive: true });
+      }
       const result = await run(shim, ["--dry-run"], {
         cwd: consumerRoot,
         env: {
@@ -552,6 +561,9 @@ describe("packed CLI", () => {
       await assert.rejects(
         access(path.join(consumerRoot, ".sandcastle", "worktrees"))
       );
+      if (manager.startsWith("pnpm")) {
+        await access(staleOverlay);
+      }
     });
   }
 
@@ -638,6 +650,14 @@ describe("packed CLI", () => {
       assert.match(error.stderr, /supports pnpm 11/);
       return true;
     });
+
+    manifest.packageManager = "pnpm@11.10.0";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await writeFile(path.join(consumerRoot, "npm-shrinkwrap.json"), "{}\n");
+    await assert.rejects(runDry(), (error) => {
+      assert.match(error.stderr, /npm-shrinkwrap\.json is unsupported/);
+      return true;
+    });
   });
 
   it("fails preflight when required GitHub labels are missing", async () => {
@@ -661,6 +681,52 @@ describe("packed CLI", () => {
       (error) => {
         assert.equal(error.code, 1);
         assert.match(error.stderr, /missing required triage labels/);
+        return true;
+      }
+    );
+  });
+
+  it("stops safely when more than 100 issues are simultaneously eligible", async () => {
+    const { consumerRoot, shim, binRoot, ghPath } = await prepareDryRunConsumer(
+      "pnpm-too-many-issues"
+    );
+    const readyIssues = Array.from({ length: 101 }, (_, index) => ({
+      id: String(index + 1),
+      title: `Issue ${index + 1}`,
+      createdAt: "2026-01-01T00:00:00Z",
+      parentId: null,
+    }));
+    const readyIssuesPath = path.join(consumerRoot, "ready-issues.json");
+    await writeFile(readyIssuesPath, JSON.stringify(readyIssues));
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+if [ "$1 $2" = "label list" ]; then
+  printf '%s\\n' '[{"name":"needs-triage"},{"name":"needs-info"},{"name":"ready-for-agent"},{"name":"ready-for-human"},{"name":"wontfix"}]'
+elif [ "$1 $2" = "issue list" ]; then
+  cat "$READY_ISSUES"
+else
+  exit 1
+fi
+`
+    );
+    await chmod(ghPath, 0o755);
+
+    await assert.rejects(
+      run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          READY_ISSUES: readyIssuesPath,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 3);
+        assert.match(
+          `${error.stdout}\n${error.stderr}`,
+          /more than 100 open ready-for-agent issues/
+        );
         return true;
       }
     );
