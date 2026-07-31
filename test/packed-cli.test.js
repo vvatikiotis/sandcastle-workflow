@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   access,
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
@@ -22,6 +23,17 @@ const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageName = "@vvatikiotis/sandcastle-workflow";
 const packageVersion = "0.1.0";
+const validRunnerConfig = [
+  "IMPLEMENTER_MODEL=test-model",
+  "IMPLEMENTER_EFFORT=low",
+  "REVIEWER_MODEL=test-model",
+  "REVIEWER_EFFORT=low",
+  "MERGER_MODEL=test-model",
+  "MERGER_EFFORT=low",
+  "FINAL_SPEC_REVIEWER_MODEL=test-model",
+  "FINAL_SPEC_REVIEWER_EFFORT=low",
+  "MAX_ITERATIONS=1",
+].join("\n");
 
 let tempRoot;
 let tarballPath;
@@ -171,6 +183,134 @@ describe("packed CLI", () => {
     const second = await run(shim, ["init"], { cwd: consumerRoot });
     assert.match(second.stdout, new RegExp(`Preserved ${examplePath}`));
     assert.equal(await readFile(examplePath, "utf8"), "project-owned\n");
+  });
+
+  it("builds the versioned default Docker image from packaged defaults", async () => {
+    const consumerRoot = await installConsumer("pnpm-docker");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
+    await mkdir(sandcastleRoot);
+    await writeFile(
+      path.join(sandcastleRoot, "sandcastle.env"),
+      `${validRunnerConfig}\n`
+    );
+    const binRoot = path.join(consumerRoot, "bin");
+    const capturePath = path.join(consumerRoot, "docker-arguments");
+    await mkdir(binRoot);
+    const dockerPath = path.join(binRoot, "docker");
+    await writeFile(
+      dockerPath,
+      '#!/bin/sh\nprintf "%s\\n" "$@" > "$DOCKER_CAPTURE"\n'
+    );
+    await chmod(dockerPath, 0o755);
+    const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+
+    const result = await run(shim, ["build-image"], {
+      cwd: consumerRoot,
+      env: {
+        ...process.env,
+        DOCKER_CAPTURE: capturePath,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.1\.0/);
+    assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
+    const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
+    const fileIndex = dockerArguments.indexOf("--file");
+    const tagIndex = dockerArguments.indexOf("--tag");
+    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.1.0");
+    assert.match(dockerArguments[fileIndex + 1], /dist\/defaults\/docker\/Dockerfile$/);
+    assert.equal(
+      dockerArguments.at(-1),
+      path.dirname(dockerArguments[fileIndex + 1])
+    );
+  });
+
+  it("uses an explicit image and contained project Dockerfile unchanged", async () => {
+    const consumerRoot = await installConsumer("pnpm-docker-override");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
+    await mkdir(sandcastleRoot);
+    await writeFile(
+      path.join(sandcastleRoot, "sandcastle.env"),
+      `${validRunnerConfig}\nDOCKER_IMAGE=registry.example/team/agent:custom\n`
+    );
+    await writeFile(path.join(sandcastleRoot, "Dockerfile"), "FROM scratch\n");
+    const binRoot = path.join(consumerRoot, "bin");
+    const capturePath = path.join(consumerRoot, "docker-arguments");
+    await mkdir(binRoot);
+    const dockerPath = path.join(binRoot, "docker");
+    await writeFile(
+      dockerPath,
+      '#!/bin/sh\nprintf "%s\\n" "$@" > "$DOCKER_CAPTURE"\n'
+    );
+    await chmod(dockerPath, 0o755);
+    const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+
+    const result = await run(shim, ["build-image"], {
+      cwd: consumerRoot,
+      env: {
+        ...process.env,
+        DOCKER_CAPTURE: capturePath,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    assert.match(result.stdout, /Docker image: registry\.example\/team\/agent:custom/);
+    assert.match(result.stdout, /Dockerfile: .*\.sandcastle\/Dockerfile \(project override\)/);
+    const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
+    assert.equal(
+      dockerArguments[dockerArguments.indexOf("--tag") + 1],
+      "registry.example/team/agent:custom"
+    );
+    assert.equal(dockerArguments.at(-1), consumerRoot);
+  });
+
+  it("rejects an escaping project Dockerfile before Docker runs", async () => {
+    const consumerRoot = await installConsumer("pnpm-docker-escape");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
+    await mkdir(sandcastleRoot);
+    await writeFile(
+      path.join(sandcastleRoot, "sandcastle.env"),
+      `${validRunnerConfig}\n`
+    );
+    const outsideDockerfile = path.join(tempRoot, "outside.Dockerfile");
+    await writeFile(outsideDockerfile, "FROM scratch\n");
+    await symlink(outsideDockerfile, path.join(sandcastleRoot, "Dockerfile"));
+    const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+
+    await assert.rejects(
+      run(shim, ["build-image"], { cwd: consumerRoot }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /Dockerfile override resolves outside/);
+        return true;
+      }
+    );
+  });
+
+  it("rejects an overlong derived Docker image tag", async () => {
+    const consumerRoot = await installConsumer("p".repeat(125));
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
+    await mkdir(sandcastleRoot);
+    await writeFile(
+      path.join(sandcastleRoot, "sandcastle.env"),
+      `${validRunnerConfig}\n`
+    );
+    const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+
+    await assert.rejects(
+      run(shim, ["build-image"], { cwd: consumerRoot }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /exceeds Docker's 128-character limit/);
+        assert.match(error.stderr, /Configure DOCKER_IMAGE explicitly/);
+        return true;
+      }
+    );
   });
 
   it("refuses to initialize through a symbolic project directory", async () => {

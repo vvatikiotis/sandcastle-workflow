@@ -23,8 +23,8 @@ const runnerConfigExample = [
   "FINAL_SPEC_REVIEWER_EFFORT=",
   "MAX_ITERATIONS=",
   "",
-  "# Optional Docker image reference. When absent, Sandcastle derives sandcastle:<project>.",
-  "# DOCKER_IMAGE=sandcastle:<project>",
+  "# Optional Docker image reference. When absent, Sandcastle derives sandcastle:<project>-v<package-version>.",
+  "# DOCKER_IMAGE=sandcastle:<project>-v<package-version>",
   "",
 ].join("\n");
 

@@ -15,9 +15,22 @@ export type DockerfileSelection = {
 
 export function resolveDockerImageName(
   configuredImage: string | undefined,
-  projectRoot: string
+  projectRoot: string,
+  packageVersion: string
 ): string {
-  return configuredImage ?? defaultImageName(projectRoot);
+  if (configuredImage !== undefined) {
+    return configuredImage;
+  }
+
+  const normalizedVersion = packageVersion.replace(/[^A-Za-z0-9_.-]/g, "-");
+  const imageName = `${defaultImageName(projectRoot)}-v${normalizedVersion}`;
+  const tag = imageName.slice(imageName.lastIndexOf(":") + 1);
+  if (tag.length > 128) {
+    throw new Error(
+      `Derived Docker image tag exceeds Docker's 128-character limit: ${imageName}. Configure DOCKER_IMAGE explicitly.`
+    );
+  }
+  return imageName;
 }
 
 export async function resolveDockerfile(options: {
