@@ -55,7 +55,7 @@ If you encounter test, environment, or context problems during review, describe 
    - Remove helpful abstractions that improve code organization
    - Make the code harder to debug or extend
 
-6. **Apply project standards**: Follow `AGENTS.md` and the authoritative root `CODING_STANDARDS.md`.
+6. **Apply project standards**: Follow the authoritative root `CODING_STANDARDS.md` and any project `AGENTS.md` that exists.
 
 # EXECUTION
 

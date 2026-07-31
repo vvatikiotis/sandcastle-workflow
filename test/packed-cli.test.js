@@ -127,6 +127,96 @@ fi
   return { consumerRoot, shim, binRoot, ghPath };
 }
 
+async function installFakeSandcastleBoundary(consumerRoot) {
+  const fakeRoot = path.join(consumerRoot, "fake-sandcastle");
+  await mkdir(fakeRoot);
+  const fakeModulePath = path.join(fakeRoot, "index.mjs");
+  const fakeDockerPath = path.join(fakeRoot, "docker.mjs");
+  const hookPath = path.join(fakeRoot, "hook.mjs");
+
+  await writeFile(
+    fakeModulePath,
+    `import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+
+function capture(value) {
+  appendFileSync(process.env.FAKE_SANDCASTLE_CAPTURE, JSON.stringify(value) + "\\n");
+}
+
+function addCommit(cwd, branch, message) {
+  const parent = execFileSync("git", ["rev-parse", branch], { cwd, encoding: "utf8" }).trim();
+  const tree = execFileSync("git", ["rev-parse", parent + "^{tree}"], { cwd, encoding: "utf8" }).trim();
+  const commit = execFileSync("git", ["commit-tree", tree, "-p", parent, "-m", message], {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Fake Agent",
+      GIT_AUTHOR_EMAIL: "agent@example.com",
+      GIT_COMMITTER_NAME: "Fake Agent",
+      GIT_COMMITTER_EMAIL: "agent@example.com",
+    },
+  }).trim();
+  execFileSync("git", ["update-ref", "refs/heads/" + branch, commit], { cwd });
+}
+
+export function codex(model, options) {
+  return { model, options };
+}
+
+export async function createSandbox(options) {
+  execFileSync("git", ["branch", options.branch], { cwd: options.cwd });
+  capture({ type: "sandbox", hooks: options.hooks });
+  return {
+    async run(runOptions) {
+      capture({ type: "phase", name: runOptions.name, promptArgs: runOptions.promptArgs });
+      if (runOptions.name.includes("implementer")) {
+        addCommit(options.cwd, options.branch, "sandcastle(implementer): #42: fake implementation");
+        return { stdout: "<phase-outcome>implemented</phase-outcome>\\n<promise>COMPLETE</promise>" };
+      }
+      return { stdout: "<phase-outcome>approved</phase-outcome>\\n<promise>COMPLETE</promise>" };
+    },
+    async close() {
+      return {};
+    },
+  };
+}
+
+export async function run(options) {
+  capture({ type: "phase", name: options.name, promptArgs: options.promptArgs, hooks: options.hooks });
+  execFileSync("git", ["merge", "--ff-only", options.promptArgs.BRANCH], { cwd: options.cwd });
+  execFileSync("gh", ["issue", "close", options.promptArgs.ISSUE_ID], { cwd: options.cwd });
+  return { stdout: "<phase-outcome>merged</phase-outcome>\\n<promise>COMPLETE</promise>" };
+}
+`
+  );
+  await writeFile(
+    fakeDockerPath,
+    `import path from "node:path";
+export function docker(options) { return options; }
+export function defaultImageName(projectRoot) {
+  return "sandcastle:" + path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
+}
+`
+  );
+  await writeFile(
+    hookPath,
+    `import { registerHooks } from "node:module";
+import { pathToFileURL } from "node:url";
+const rootUrl = pathToFileURL(${JSON.stringify(fakeModulePath)}).href;
+const dockerUrl = pathToFileURL(${JSON.stringify(fakeDockerPath)}).href;
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "@ai-hero/sandcastle") return { url: rootUrl, shortCircuit: true };
+    if (specifier === "@ai-hero/sandcastle/sandboxes/docker") return { url: dockerUrl, shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+});
+`
+  );
+  return hookPath;
+}
+
 describe("packed CLI", () => {
   before(async () => {
     tempRoot = await realpath(
@@ -167,6 +257,26 @@ describe("packed CLI", () => {
 
     assert.equal(entries.some((entry) => entry.startsWith("package/src/")), false);
     assert.equal(entries.some((entry) => entry.startsWith("package/test/")), false);
+
+    for (const promptName of [
+      "implement-prompt.md",
+      "merge-prompt.md",
+      "standalone-implement-prompt.md",
+      "standalone-merge-prompt.md",
+      "standalone-review-prompt.md",
+    ]) {
+      const { stdout: prompt } = await run("tar", [
+        "-xOf",
+        tarballPath,
+        `package/dist/defaults/prompts/${promptName}`,
+      ]);
+      assert.doesNotMatch(prompt, /\bpnpm\b/);
+      assert.match(prompt, /\{\{TYPECHECK_COMMAND\}\}/);
+      assert.match(prompt, /\{\{TEST_COMMAND\}\}/);
+      if (promptName.includes("merge")) {
+        assert.match(prompt, /\{\{INSTALL_COMMAND\}\}/);
+      }
+    }
 
     const { stdout: manifestText } = await run("tar", [
       "-xOf",
@@ -532,6 +642,168 @@ fi
       }
     );
   });
+
+  it("validates a package-manager-neutral project prompt override", async () => {
+    const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+      "pnpm-prompt-override"
+    );
+    const defaultPromptPath = path.join(
+      consumerRoot,
+      "node_modules",
+      "@vvatikiotis",
+      "sandcastle-workflow",
+      "dist",
+      "defaults",
+      "prompts",
+      "standalone-implement-prompt.md"
+    );
+    const overridePath = path.join(
+      consumerRoot,
+      ".sandcastle",
+      "standalone-implement-prompt.md"
+    );
+    const defaultPrompt = await readFile(defaultPromptPath, "utf8");
+    await writeFile(overridePath, defaultPrompt);
+    const environment = {
+      ...process.env,
+      PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+    };
+
+    const valid = await run(shim, ["--dry-run"], {
+      cwd: consumerRoot,
+      env: environment,
+    });
+    assert.match(
+      valid.stdout,
+      /Prompt standalone-implement-prompt\.md: project override/
+    );
+
+    await writeFile(
+      overridePath,
+      defaultPrompt.replace("{{TEST_COMMAND}}", "project test command")
+    );
+    await assert.rejects(
+      run(shim, ["--dry-run"], { cwd: consumerRoot, env: environment }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /standalone-implement-prompt\.md/);
+        assert.match(error.stderr, /\{\{TEST_COMMAND\}\}/);
+        assert.match(error.stderr, /workflow version 0\.1\.0/);
+        return true;
+      }
+    );
+  });
+
+  for (const manager of ["npm-standalone", "pnpm-standalone"]) {
+    it(`executes a standalone issue in a ${manager.split("-")[0]} consumer`, async () => {
+      const { consumerRoot, shim, binRoot, ghPath } = await prepareDryRunConsumer(
+        manager
+      );
+      await writeFile(
+        path.join(consumerRoot, ".sandcastle", ".env"),
+        "GH_TOKEN=test-token\n"
+      );
+      const issueStatePath = path.join(consumerRoot, "issue-state");
+      await writeFile(issueStatePath, "OPEN\n");
+      await writeFile(
+        ghPath,
+        `#!/bin/sh
+if [ "$1 $2" = "label list" ]; then
+  printf '%s\\n' '[{"name":"needs-triage"},{"name":"needs-info"},{"name":"ready-for-agent"},{"name":"ready-for-human"},{"name":"wontfix"}]'
+elif [ "$1 $2" = "issue list" ]; then
+  if grep -q CLOSED "$ISSUE_STATE"; then printf '[]\\n'; else printf '%s\\n' '[{"id":"42","title":"Standalone","createdAt":"2026-01-01T00:00:00Z","parentId":null}]'; fi
+elif [ "$1" = "api" ]; then
+  printf '[]\\n'
+elif [ "$1 $2" = "issue view" ]; then
+  if printf '%s\\n' "$*" | grep -q -- '--json state'; then
+    cat "$ISSUE_STATE"
+  else
+    printf '%s\\n' '{"parent":null,"blockedBy":{"nodes":[]},"blocking":{"nodes":[]}}'
+  fi
+elif [ "$1 $2" = "issue close" ]; then
+  printf 'CLOSED\\n' > "$ISSUE_STATE"
+else
+  echo "unexpected gh arguments: $*" >&2
+  exit 1
+fi
+`
+      );
+      await chmod(ghPath, 0o755);
+      const dockerPath = path.join(binRoot, "docker");
+      await writeFile(
+        dockerPath,
+        '#!/bin/sh\nif [ "$1 $2" = "image inspect" ]; then exit 0; fi\nexit 1\n'
+      );
+      await chmod(dockerPath, 0o755);
+      const hookPath = await installFakeSandcastleBoundary(consumerRoot);
+      const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
+
+      const result = await run(shim, [], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          FAKE_SANDCASTLE_CAPTURE: capturePath,
+          ISSUE_STATE: issueStatePath,
+          NODE_OPTIONS: `--import=${hookPath}`,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      });
+
+      assert.match(result.stdout, /Selected standalone issue #42/);
+      assert.match(result.stdout, /Standalone merge complete/);
+      assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+      assert.equal((await readFile(issueStatePath, "utf8")).trim(), "CLOSED");
+      const captures = (await readFile(capturePath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const implementer = captures.find((entry) =>
+        entry.name?.includes("implementer")
+      );
+      const expected = manager.startsWith("npm")
+        ? {
+            INSTALL_COMMAND: "npm ci",
+            TYPECHECK_COMMAND: "npm run typecheck",
+            TEST_COMMAND: "npm test",
+          }
+        : {
+            INSTALL_COMMAND: "pnpm install --frozen-lockfile",
+            TYPECHECK_COMMAND: "pnpm typecheck",
+            TEST_COMMAND: "pnpm test",
+          };
+      assert.deepEqual(
+        {
+          INSTALL_COMMAND: implementer.promptArgs.INSTALL_COMMAND,
+          TYPECHECK_COMMAND: implementer.promptArgs.TYPECHECK_COMMAND,
+          TEST_COMMAND: implementer.promptArgs.TEST_COMMAND,
+        },
+        expected
+      );
+      const sandbox = captures.find((entry) => entry.type === "sandbox");
+      assert.equal(
+        sandbox.hooks.sandbox.onSandboxReady.at(-1).command,
+        expected.INSTALL_COMMAND
+      );
+      const merger = captures.find((entry) => entry.name?.includes("merger"));
+      assert.match(
+        merger.promptArgs.VERIFICATION_WORKTREE_PATH,
+        /^\/home\/agent\/workspace\/\.sandcastle\/worktrees\//
+      );
+      assert.equal(
+        merger.promptArgs.VERIFICATION_WORKTREE_PATH.includes(consumerRoot),
+        false
+      );
+      await assert.rejects(
+        access(path.join(consumerRoot, ".sandcastle", "merger-recovery.json"))
+      );
+      assert.deepEqual(
+        await readdir(
+          path.join(consumerRoot, ".sandcastle", "node-modules-overlays")
+        ),
+        []
+      );
+    });
+  }
 
   it("refuses to initialize through a symbolic project directory", async () => {
     const consumerRoot = await installConsumer("pnpm-symlink");

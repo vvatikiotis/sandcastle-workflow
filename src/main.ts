@@ -250,6 +250,11 @@ function execFile(file: string, args: readonly string[]) {
 }
 
 const packageManager = await resolvePackageManager(projectRoot);
+const verificationPromptArgs = {
+  INSTALL_COMMAND: packageManager.commands.install.join(" "),
+  TYPECHECK_COMMAND: packageManager.commands.typecheck.join(" "),
+  TEST_COMMAND: packageManager.commands.test.join(" "),
+};
 
 //
 // region Configuration
@@ -1715,7 +1720,10 @@ async function runStandaloneIssue(
             maxIterations: 1,
             agent: createConfiguredAgent(AGENT_CONFIG.implementer),
             promptFile: promptFiles.get("standalone-implement-prompt.md"),
-            promptArgs: { ISSUE_ID: issue.id },
+            promptArgs: {
+              ...verificationPromptArgs,
+              ISSUE_ID: issue.id,
+            },
             logging: { type: "file", path: logPath },
           }),
       });
@@ -1789,6 +1797,7 @@ async function runStandaloneIssue(
             agent: createConfiguredAgent(AGENT_CONFIG.reviewer),
             promptFile: promptFiles.get("standalone-review-prompt.md"),
             promptArgs: {
+              ...verificationPromptArgs,
               BASE_COMMIT: baseSnapshot.commit,
               BRANCH: branch,
               ISSUE_ID: issue.id,
@@ -1933,6 +1942,7 @@ async function runStandaloneIssue(
               branchStrategy: { type: "head" },
               promptFile: promptFiles.get("standalone-merge-prompt.md"),
               promptArgs: {
+                ...verificationPromptArgs,
                 BASE_BRANCH: baseSnapshot.branch,
                 BASE_COMMIT: baseSnapshot.commit,
                 BRANCH: branch,
@@ -2488,6 +2498,7 @@ if (await recoverInterruptedMerger()) {
               agent: createConfiguredAgent(AGENT_CONFIG.implementer),
               promptFile: promptFiles.get("implement-prompt.md"),
               promptArgs: {
+                ...verificationPromptArgs,
                 ISSUE_ID: plannedIssue.id,
                 SPEC_ISSUE_ID: selectedSpec.id,
               },
@@ -2564,6 +2575,7 @@ if (await recoverInterruptedMerger()) {
               agent: createConfiguredAgent(AGENT_CONFIG.reviewer),
               promptFile: promptFiles.get("review-prompt.md"),
               promptArgs: {
+                ...verificationPromptArgs,
                 BASE_COMMIT: baseSnapshot.commit,
                 BRANCH: branch,
                 ISSUE_ID: plannedIssue.id,
@@ -2727,6 +2739,7 @@ if (await recoverInterruptedMerger()) {
                 branchStrategy: { type: "head" },
                 promptFile: promptFiles.get("merge-prompt.md"),
                 promptArgs: {
+                  ...verificationPromptArgs,
                   BASE_BRANCH: baseSnapshot.branch,
                   BASE_COMMIT: baseSnapshot.commit,
                   BRANCH: branch,

@@ -16,7 +16,7 @@ Every GitHub issue comment you create MUST begin with:
 2. Run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. Confirm it remains unparented and has no open blockers.
 3. Verify the reviewed branch exists and has no changes under `docs/adr/`.
 4. Sandcastle already created the verification worktree at `{{VERIFICATION_WORKTREE_PATH}}`. Rebase the reviewed branch there onto `{{BASE_COMMIT}}`; do not check out `{{BRANCH}}` in the main checkout or create another worktree.
-5. Run `pnpm install --frozen-lockfile`, `pnpm typecheck`, and `pnpm test` in the verification worktree. Fix only demonstrated implementation failures; never modify ADRs or `docs/adr/README.md`. Any fix commit must be titled exactly:
+5. Run `{{INSTALL_COMMAND}}`, `{{TYPECHECK_COMMAND}}`, and `{{TEST_COMMAND}}` in the verification worktree. Fix only demonstrated implementation failures; never modify ADRs or `docs/adr/README.md`. Any fix commit must be titled exactly:
 
 `sandcastle(merger): #{{ISSUE_ID}}: <short message>`
 

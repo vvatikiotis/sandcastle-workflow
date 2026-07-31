@@ -58,9 +58,9 @@ Do not check out `{{BRANCH}}` in the main checkout. Rebase the branch without ch
 
    ```bash
    cd {{VERIFICATION_WORKTREE_PATH}}
-   pnpm install --frozen-lockfile
-   pnpm typecheck
-   pnpm test
+   {{INSTALL_COMMAND}}
+   {{TYPECHECK_COMMAND}}
+   {{TEST_COMMAND}}
    ```
 
    If verification fails, fix the implementation in the temporary worktree without modifying ADRs or `docs/adr/README.md`, rerun verification, and commit any fixes. The commit title MUST be exactly:
