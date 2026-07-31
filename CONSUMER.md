@@ -24,6 +24,7 @@ Version `0.1.1` supports:
 - Node.js 22 or newer on macOS and Linux
 - npm 10 or pnpm 11 repositories
 - GitHub.com Issues and native issue relationships
+- a current GitHub CLI release that exposes native sub-issue and dependency relationship fields
 - Docker sandboxes
 - Codex runtime agents
 
@@ -126,6 +127,7 @@ The Git root must contain:
 - exactly one supported lockfile
 - `CODING_STANDARDS.md`
 - a GitHub.com `origin` remote and working GitHub CLI authentication
+- a GitHub CLI release that supports the native `parent`, `blockedBy`, and `blocking` issue fields; update the CLI if relationship preflight reports an unsupported field
 - labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`
 
 `AGENTS.md`, `CONTEXT.md`, and project ADRs are optional. Prompts use them only when present.
