@@ -13,6 +13,8 @@ The package is private and local-only:
 
 The package owns executable code and read-only defaults. Consumer repositories own configuration, credentials, project prompt guidance, Dockerfile overrides, logs, worktrees, dependency overlays, active-run locks, and merger recovery state.
 
+Workflow state is private local data. Preserve owner-only directory and file modes, atomic recovery-marker writes, canonical worktree validation before recovery commands, and the consumer warning that agent logs and Codex sessions may contain sensitive content.
+
 Preserve the GitHub-native control plane in ADR-0001. Treat `CONTEXT.md`, `CODING_STANDARDS.md`, `docs/adr/`, and its index as authoritative; ADR files and the index are read-only during implementation.
 
 ## Prerequisites

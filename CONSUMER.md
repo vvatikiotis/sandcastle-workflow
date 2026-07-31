@@ -101,7 +101,7 @@ cp .sandcastle/sandcastle.env.example .sandcastle/sandcastle.env
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
-The runner configuration selects models, effort, maximum iterations, and an optional Docker image. The agent environment must declare `GH_TOKEN`; an empty declaration uses a non-empty host value. Initialization does not create credentials, active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, overlays, or recovery state.
+The runner configuration selects models, effort, maximum iterations, and an optional Docker image. The agent environment supports only `GH_TOKEN`; an empty declaration uses a non-empty host value. Any other key in `.sandcastle/.env` stops normal-run preflight before an agent starts. Initialization does not create credentials, active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, overlays, or recovery state.
 
 ## Consumer contract
 
@@ -194,7 +194,13 @@ Workflow-owned state remains beneath the consumer's `.sandcastle` directory:
 - merger recovery state
 - active-run ownership lock
 
-The installed package is treated as read-only. This guarantee does not restrict agent activity. Agent containers intentionally receive writable worktrees, network access, and `GH_TOKEN`; agents can create commits and branches and mutate GitHub issues within the workflow. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes. Diagnostics do not print credential values.
+Normal runs enforce owner-only permissions on `.sandcastle`, its worktree, overlay, and log directories (`0700`), and on new log, lock, and merger-recovery files (`0600`). The owner is the host user running Sandcastle. The default container agent uses the same numeric user ID, so these permissions protect against other local users, not against agents that receive the project-root mount.
+
+Treat workflow logs as sensitive. They contain complete agent messages, exact agent commands, execution metadata, and formatted failures. They can also contain source or issue content, local paths, and any credential an agent prints. Sandcastle does not intentionally include `GH_TOKEN` in runner-generated diagnostics, but it does not redact arbitrary agent output or dependency errors. Codex session files under the host user's `.codex` directory may contain resolved prompts, project guidance, and review diffs. Define access, backup, retention, and deletion practices accordingly.
+
+Merger recovery state contains branch names, the issue-derived reviewed branch, and an absolute host worktree path. It does not intentionally contain credentials or source content.
+
+The installed package is treated as read-only. This guarantee does not restrict agent activity. Agent containers intentionally receive writable worktrees, network access, and `GH_TOKEN`; agents can create commits and branches and mutate GitHub issues within the workflow. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes.
 
 Merger verification keeps host and container paths separate. Host Git, recovery, and cleanup use absolute host paths. Prompts and dependency mounts use `/home/agent/workspace/...` paths.
 

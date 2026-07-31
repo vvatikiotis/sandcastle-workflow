@@ -23,8 +23,19 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import chalk from "chalk";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFile as execFileCallback } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  unlink,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -616,6 +627,11 @@ async function loadAgentEnvironment(): Promise<Record<string, string>> {
         `${agentEnvironmentPath}:${lineNumber}: expected a KEY=value assignment.`
       );
     }
+    if (key !== "GH_TOKEN") {
+      throw new Error(
+        `${agentEnvironmentPath}:${lineNumber}: unsupported agent environment key ${key}. Only GH_TOKEN is supported; remove ${key} before running Sandcastle.`
+      );
+    }
     if (values.has(key)) {
       throw new Error(
         `${agentEnvironmentPath}:${lineNumber}: duplicate environment key ${key}.`
@@ -653,7 +669,7 @@ async function loadAgentEnvironment(): Promise<Record<string, string>> {
   }
   values.set("GH_TOKEN", ghToken);
 
-  return Object.fromEntries(values);
+  return { GH_TOKEN: ghToken };
 }
 
 const agentEnvironment = isDryRun ? {} : await loadAgentEnvironment();
@@ -929,20 +945,40 @@ function announceAgentStart(runName: string, branch: string): void {
 
 function formatTimestamp(date = new Date()): string {
   const pad2 = (n: number) => String(n).padStart(2, "0");
+  const pad3 = (n: number) => String(n).padStart(3, "0");
 
   return (
     [date.getFullYear(), pad2(date.getMonth() + 1), pad2(date.getDate())].join(
       ""
-    ) + `-${pad2(date.getHours())}${pad2(date.getMinutes())}`
+    ) +
+    `-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}-${pad3(date.getMilliseconds())}`
   );
 }
 
-function createLogPath(scope: string, agentType: string): string {
-  return projectPath(
-    ".sandcastle",
-    "logs",
-    `sandcastle-${scope}-${agentType}-${formatTimestamp()}.log`
+async function requirePrivateDirectory(directoryPath: string): Promise<void> {
+  await mkdir(directoryPath, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(directoryPath);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(
+      `Sandcastle private state path ${directoryPath} must be a real directory.`
+    );
+  }
+  await chmod(directoryPath, 0o700);
+}
+
+async function createLogPath(
+  scope: string,
+  agentType: string
+): Promise<string> {
+  const logDirectory = projectPath(".sandcastle", "logs");
+  await requirePrivateDirectory(logDirectory);
+  const logPath = path.join(
+    logDirectory,
+    `sandcastle-${scope}-${agentType}-${formatTimestamp()}-${process.pid}.log`
   );
+  const handle = await open(logPath, "wx", 0o600);
+  await handle.close();
+  return logPath;
 }
 
 //
@@ -1115,34 +1151,76 @@ async function clearMergerRecoveryMarker(): Promise<void> {
   await rm(mergerRecoveryPath, { force: true });
 }
 
+async function resolveRegisteredRecoveryWorktree(
+  verificationWorktreePath: string
+): Promise<string | undefined> {
+  const worktreeRoot = projectPath(".sandcastle", "worktrees");
+  const resolvedRoot = await realpath(worktreeRoot);
+  if (resolvedRoot !== path.resolve(worktreeRoot)) {
+    throw new Error(`Workflow worktree directory is redirected: ${worktreeRoot}.`);
+  }
+
+  const requestedPath = path.resolve(verificationWorktreePath);
+  if (
+    !isWithinDirectory(resolvedRoot, requestedPath) ||
+    !/^sandcastle-merger-verify-issue-\d+$/.test(path.basename(requestedPath))
+  ) {
+    throw new Error(
+      `Recovery worktree is not an expected verification path: ${requestedPath}.`
+    );
+  }
+
+  let metadata;
+  try {
+    metadata = await lstat(requestedPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(
+      `Recovery worktree must be a real directory: ${requestedPath}.`
+    );
+  }
+  const resolvedPath = await realpath(requestedPath);
+  if (resolvedPath !== requestedPath) {
+    throw new Error(`Recovery worktree is redirected: ${requestedPath}.`);
+  }
+
+  const { stdout } = await execFile("git", [
+    "-C",
+    projectRoot,
+    "worktree",
+    "list",
+    "--porcelain",
+    "-z",
+  ]);
+  const registered = stdout
+    .split("\0")
+    .filter((entry) => entry.startsWith("worktree "))
+    .map((entry) => path.resolve(entry.slice("worktree ".length)))
+    .includes(resolvedPath);
+  if (!registered) {
+    throw new Error(
+      `Git does not register the recovery worktree: ${resolvedPath}.`
+    );
+  }
+
+  return resolvedPath;
+}
+
 async function recoverMergerState(
   baseBranch: string,
   verificationWorktreePath: string
 ): Promise<boolean> {
-  const verificationWorktreeRoot = projectPath(
-    ".sandcastle",
-    "worktrees"
-  );
-  const resolvedVerificationWorktreePath = path.resolve(
-    verificationWorktreePath
-  );
-  if (
-    resolvedVerificationWorktreePath === verificationWorktreeRoot ||
-    !isWithinDirectory(
-      verificationWorktreeRoot,
-      resolvedVerificationWorktreePath
-    )
-  ) {
-    console.warn(
-      `WARNING: Refusing merger recovery outside ${verificationWorktreeRoot}: ${resolvedVerificationWorktreePath}.`
-    );
-    return false;
-  }
-
   try {
-    const verificationRebaseAborted = await abortRebase(
-      resolvedVerificationWorktreePath
-    );
+    const resolvedVerificationWorktreePath =
+      await resolveRegisteredRecoveryWorktree(verificationWorktreePath);
+    const verificationRebaseAborted =
+      resolvedVerificationWorktreePath === undefined ||
+      (await abortRebase(resolvedVerificationWorktreePath));
     const baseCheckoutRecovered = verificationRebaseAborted
       ? await recoverBaseCheckout(baseBranch)
       : false;
@@ -1499,10 +1577,25 @@ async function writeMergerRecoveryMarker(
   reviewedBranch: string,
   verificationWorktreePath: string
 ): Promise<void> {
-  await writeFile(
-    mergerRecoveryPath,
-    JSON.stringify({ baseBranch, reviewedBranch, verificationWorktreePath })
-  );
+  const temporaryPath = `${mergerRecoveryPath}.${process.pid}.${randomUUID()}.tmp`;
+  let handle;
+  try {
+    handle = await open(temporaryPath, "wx", 0o600);
+    await handle.writeFile(
+      JSON.stringify({ baseBranch, reviewedBranch, verificationWorktreePath })
+    );
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, mergerRecoveryPath);
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporaryPath).catch(() => undefined);
+    throw new Error(
+      `Could not write private merger recovery state ${mergerRecoveryPath}.`,
+      { cause: error }
+    );
+  }
 }
 
 async function deleteReviewedBranch(branch: string): Promise<void> {
@@ -1531,7 +1624,7 @@ async function runFinalSpecReview(
 ): Promise<AgentPhaseResult<FinalSpecOutcome> & { logPath: string }> {
   await requireDockerImage();
   const branch = await getCheckedOutBranch();
-  const logPath = createLogPath(
+  const logPath = await createLogPath(
     `spec-${specIssueId}-final-review`,
     "final-spec-reviewer"
   );
@@ -1824,7 +1917,7 @@ async function runStandaloneIssue(
       );
       announceAgentStart(runName, branch);
 
-      const logPath = createLogPath(
+      const logPath = await createLogPath(
         `issue-${issue.id}`,
         "standalone-implementer"
       );
@@ -1896,7 +1989,7 @@ async function runStandaloneIssue(
     }
 
     if (!jumpToMerger) {
-      const reviewLogPath = createLogPath(
+      const reviewLogPath = await createLogPath(
         `issue-${issue.id}`,
         "standalone-reviewer"
       );
@@ -2031,7 +2124,10 @@ async function runStandaloneIssue(
   let mergerSucceeded = false;
   let mergerRecoveryFailed = false;
   let mergerOperationError: unknown;
-  const mergerLogPath = createLogPath(`issue-${issue.id}`, "standalone-merger");
+  const mergerLogPath = await createLogPath(
+    `issue-${issue.id}`,
+    "standalone-merger"
+  );
 
   try {
     const runName = createRunName(
@@ -2228,6 +2324,11 @@ let skippedStaleStandaloneSelection = false;
 let runLock: RunLock | undefined;
 
 if (!isDryRun) {
+  await requirePrivateDirectory(projectPath(".sandcastle"));
+  await requirePrivateDirectory(projectPath(".sandcastle", "worktrees"));
+  await requirePrivateDirectory(
+    projectPath(".sandcastle", "node-modules-overlays")
+  );
   runLock = await acquireRunLock(projectPath(".sandcastle", "run.lock"));
   const staleOverlayCleanup = await cleanupStaleNodeModulesOverlays(
     nodeModulesOverlayRoot
@@ -2615,7 +2716,7 @@ if (recoverySucceeded) {
         );
         announceAgentStart(runName, branch);
 
-        const logPath = createLogPath(
+        const logPath = await createLogPath(
           `issue-${plannedIssue.id}`,
           "implementer"
         );
@@ -2688,7 +2789,7 @@ if (recoverySucceeded) {
       // branch, and either approves or makes corrections directly on the branch.
       // -----------------------------------------------------------------------
       if (!jumpToMerger) {
-        const reviewLogPath = createLogPath(
+        const reviewLogPath = await createLogPath(
           `issue-${plannedIssue.id}`,
           "reviewer"
         );
@@ -2842,7 +2943,10 @@ if (recoverySucceeded) {
     let mergerSucceeded = false;
     let mergerRecoveryFailed = false;
     let mergerOperationError: unknown;
-    const mergerLogPath = createLogPath(`issue-${plannedIssue.id}`, "merger");
+    const mergerLogPath = await createLogPath(
+      `issue-${plannedIssue.id}`,
+      "merger"
+    );
 
     try {
       const runName = createRunName(
