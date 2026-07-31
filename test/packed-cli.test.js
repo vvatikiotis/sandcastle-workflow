@@ -184,6 +184,10 @@ export async function createSandbox(options) {
 
 export async function run(options) {
   capture({ type: "phase", name: options.name, promptArgs: options.promptArgs, hooks: options.hooks });
+  if (options.name.includes("final-spec-reviewer")) {
+    execFileSync("gh", ["issue", "close", options.promptArgs.SPEC_ISSUE_ID], { cwd: options.cwd });
+    return { stdout: "<phase-outcome>closed</phase-outcome>\\n<promise>COMPLETE</promise>" };
+  }
   execFileSync("git", ["merge", "--ff-only", options.promptArgs.BRANCH], { cwd: options.cwd });
   execFileSync("gh", ["issue", "close", options.promptArgs.ISSUE_ID], { cwd: options.cwd });
   return { stdout: "<phase-outcome>merged</phase-outcome>\\n<promise>COMPLETE</promise>" };
@@ -881,6 +885,80 @@ fi
     );
     assert.equal(implementer.promptArgs.ISSUE_ID, "101");
     assert.equal(implementer.promptArgs.SPEC_ISSUE_ID, "100");
+  });
+
+  it("runs final review only after every direct child is closed", async () => {
+    const { consumerRoot, shim, binRoot, ghPath } = await prepareDryRunConsumer(
+      "pnpm-final-review"
+    );
+    await writeFile(
+      path.join(consumerRoot, ".sandcastle", ".env"),
+      "GH_TOKEN=test-token\n"
+    );
+    const issueStatePath = path.join(consumerRoot, "spec-state");
+    await writeFile(issueStatePath, "OPEN\n");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+if [ "$1 $2" = "label list" ]; then
+  printf '%s\\n' '[{"name":"needs-triage"},{"name":"needs-info"},{"name":"ready-for-agent"},{"name":"ready-for-human"},{"name":"wontfix"}]'
+elif [ "$1 $2" = "issue list" ]; then
+  printf '%s\\n' '[{"id":"100","title":"Spec","createdAt":"2026-01-01T00:00:00Z","parentId":null}]'
+elif [ "$1" = "api" ]; then
+  if printf '%s\\n' "$2" | grep -q '/issues/100/sub_issues'; then
+    printf '%s\\n' '[{"number":101,"title":"Child","state":"closed","labels":[]}]'
+  else
+    printf '[]\\n'
+  fi
+elif [ "$1 $2" = "issue view" ]; then
+  if printf '%s\\n' "$*" | grep -q -- '--json state'; then
+    cat "$ISSUE_STATE"
+  elif [ "$3" = "101" ]; then
+    printf '%s\\n' '{"parent":{"number":100},"blockedBy":{"nodes":[]},"blocking":{"nodes":[{"number":100}]}}'
+  else
+    printf '%s\\n' '{"parent":null,"blockedBy":{"nodes":[]},"blocking":{"nodes":[]}}'
+  fi
+elif [ "$1 $2" = "issue close" ]; then
+  printf 'CLOSED\\n' > "$ISSUE_STATE"
+else
+  echo "unexpected gh arguments: $*" >&2
+  exit 1
+fi
+`
+    );
+    await chmod(ghPath, 0o755);
+    const dockerPath = path.join(binRoot, "docker");
+    await writeFile(
+      dockerPath,
+      '#!/bin/sh\nif [ "$1 $2" = "image inspect" ]; then exit 0; fi\nexit 1\n'
+    );
+    await chmod(dockerPath, 0o755);
+    const hookPath = await installFakeSandcastleBoundary(consumerRoot);
+    const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
+
+    const result = await run(shim, [], {
+      cwd: consumerRoot,
+      env: {
+        ...process.env,
+        FAKE_SANDCASTLE_CAPTURE: capturePath,
+        ISSUE_STATE: issueStatePath,
+        NODE_OPTIONS: `--import=${hookPath}`,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    assert.match(result.stdout, /Running final spec review/);
+    assert.match(result.stdout, /Final spec review outcome: closed/);
+    assert.match(result.stdout, /Spec #100 passed final review and closed/);
+    assert.equal((await readFile(issueStatePath, "utf8")).trim(), "CLOSED");
+    const captures = (await readFile(capturePath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const finalReview = captures.find((entry) =>
+      entry.name?.includes("final-spec-reviewer")
+    );
+    assert.equal(finalReview.promptArgs.SPEC_ISSUE_ID, "100");
   });
 
   it("refuses to initialize through a symbolic project directory", async () => {
