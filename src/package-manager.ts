@@ -95,7 +95,15 @@ export async function resolvePackageManager(
   requireVerificationScripts(manifest);
 
   const npmLockfile = await pathExists(path.join(projectRoot, "package-lock.json"));
+  const npmShrinkwrap = await pathExists(
+    path.join(projectRoot, "npm-shrinkwrap.json")
+  );
   const pnpmLockfile = await pathExists(path.join(projectRoot, "pnpm-lock.yaml"));
+  if (npmShrinkwrap) {
+    throw new Error(
+      "npm-shrinkwrap.json is unsupported. Use package-lock.json for an npm 10 consumer."
+    );
+  }
   if (npmLockfile && pnpmLockfile) {
     throw new Error(
       "The consumer repository contains both package-lock.json and pnpm-lock.yaml. Keep exactly one supported lockfile."
