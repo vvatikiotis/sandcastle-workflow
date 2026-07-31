@@ -12,6 +12,8 @@ This context packages and runs a deterministic issue-driven coding workflow.
 
 **Built-in Default**: A prompt or Dockerfile shipped in the Workflow Package and resolved relative to the compiled executable.
 
-**Project Override**: A Consumer Repository-owned prompt or Dockerfile that safely replaces one matching Built-in Default.
+**Project Guidance**: Consumer Repository-owned phase instructions added to one Built-in Default prompt without replacing its packaged workflow and safety rules.
+
+**Project Override**: A Consumer Repository-owned Dockerfile that safely replaces the Built-in Default Dockerfile.
 
 **Control Plane**: GitHub-native issue state, direct sub-issue relationships, and blocking relationships used for deterministic work selection.

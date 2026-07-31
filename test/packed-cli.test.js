@@ -201,7 +201,12 @@ export async function createSandbox(options) {
   capture({ type: "sandbox", hooks: options.hooks });
   return {
     async run(runOptions) {
-      capture({ type: "phase", name: runOptions.name, promptArgs: runOptions.promptArgs });
+      capture({
+        type: "phase",
+        name: runOptions.name,
+        promptArgs: runOptions.promptArgs,
+        promptFile: runOptions.promptFile,
+      });
       if (runOptions.name.includes("implementer")) {
         addCommit(options.cwd, options.branch, "sandcastle(implementer): #42: fake implementation");
         return { stdout: "<phase-outcome>implemented</phase-outcome>\\n<promise>COMPLETE</promise>" };
@@ -215,7 +220,13 @@ export async function createSandbox(options) {
 }
 
 export async function run(options) {
-  capture({ type: "phase", name: options.name, promptArgs: options.promptArgs, hooks: options.hooks });
+  capture({
+    type: "phase",
+    name: options.name,
+    promptArgs: options.promptArgs,
+    promptFile: options.promptFile,
+    hooks: options.hooks,
+  });
   if (options.name.includes("final-spec-reviewer")) {
     execFileSync("gh", ["issue", "close", options.promptArgs.SPEC_ISSUE_ID], { cwd: options.cwd });
     return { stdout: "<phase-outcome>closed</phase-outcome>\\n<promise>COMPLETE</promise>" };
@@ -793,54 +804,32 @@ fi
     );
   });
 
-  it("validates a package-manager-neutral project prompt override", async () => {
+  it("accepts phase-specific project guidance without replacing the built-in prompt", async () => {
     const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
-      "pnpm-prompt-override"
+      "pnpm-prompt-guidance"
     );
-    const defaultPromptPath = path.join(
-      consumerRoot,
-      "node_modules",
-      "@vvatikiotis",
-      "sandcastle-workflow",
-      "dist",
-      "defaults",
-      "prompts",
-      "standalone-implement-prompt.md"
-    );
-    const overridePath = path.join(
+    const guidancePath = path.join(
       consumerRoot,
       ".sandcastle",
       "standalone-implement-prompt.md"
     );
-    const defaultPrompt = await readFile(defaultPromptPath, "utf8");
-    await writeFile(overridePath, defaultPrompt);
-    const environment = {
-      ...process.env,
-      PATH: `${binRoot}:${process.env.PATH ?? ""}`,
-    };
+    await writeFile(guidancePath, "Run the project-specific acceptance check.\n");
 
-    const valid = await run(shim, ["--dry-run"], {
+    const result = await run(shim, ["--dry-run"], {
       cwd: consumerRoot,
-      env: environment,
+      env: {
+        ...process.env,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      },
     });
-    assert.match(
-      valid.stdout,
-      /Prompt standalone-implement-prompt\.md: project override/
-    );
 
-    await writeFile(
-      overridePath,
-      defaultPrompt.replace("{{TEST_COMMAND}}", "project test command")
+    assert.match(
+      result.stdout,
+      /Prompt standalone-implement-prompt\.md: built-in .*dist\/defaults\/prompts\/standalone-implement-prompt\.md/
     );
-    await assert.rejects(
-      run(shim, ["--dry-run"], { cwd: consumerRoot, env: environment }),
-      (error) => {
-        assert.equal(error.code, 1);
-        assert.match(error.stderr, /standalone-implement-prompt\.md/);
-        assert.match(error.stderr, /\{\{TEST_COMMAND\}\}/);
-        assert.match(error.stderr, /workflow version 0\.1\.1/);
-        return true;
-      }
+    assert.match(
+      result.stdout,
+      /Project guidance standalone-implement-prompt\.md: .*\.sandcastle\/standalone-implement-prompt\.md/
     );
   });
 
@@ -852,6 +841,15 @@ fi
       await writeFile(
         path.join(consumerRoot, ".sandcastle", ".env"),
         "GH_TOKEN=test-token\n"
+      );
+      const projectGuidance = "Run the project-specific acceptance check.\n";
+      await writeFile(
+        path.join(
+          consumerRoot,
+          ".sandcastle",
+          "standalone-implement-prompt.md"
+        ),
+        projectGuidance
       );
       const issueStatePath = path.join(consumerRoot, "issue-state");
       await writeFile(issueStatePath, "OPEN\n");
@@ -933,6 +931,12 @@ fi
       const implementer = captures.find((entry) =>
         entry.name?.includes("implementer")
       );
+      assert.equal(implementer.promptArgs.PROJECT_GUIDANCE, projectGuidance);
+      assert.match(
+        implementer.promptFile,
+        /dist\/defaults\/prompts\/standalone-implement-prompt\.md$/
+      );
+      assert.equal(implementer.promptFile.includes(".sandcastle"), false);
       const expected = manager.startsWith("npm")
         ? {
             INSTALL_COMMAND: "npm ci",

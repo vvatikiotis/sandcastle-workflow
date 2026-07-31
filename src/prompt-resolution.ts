@@ -21,53 +21,9 @@ export type PromptFilename = (typeof promptFilenames)[number];
 export type PromptSelection = {
   filename: PromptFilename;
   path: string;
-  source: "built-in" | "project override";
+  guidance: string;
+  guidancePath?: string;
 };
-
-type PromptContractElement = {
-  description: string;
-  value: string;
-};
-
-function collectMatches(contents: string, pattern: RegExp): string[] {
-  return [...contents.matchAll(pattern)].map((match) => match[0]);
-}
-
-function extractPromptContract(contents: string): PromptContractElement[] {
-  const elements = [
-    ...collectMatches(contents, /\{\{[A-Z][A-Z0-9_]*\}\}/g).map((value) => ({
-      description: `placeholder ${value}`,
-      value,
-    })),
-    ...collectMatches(contents, /^!`[^`\r\n]+`\s*$/gm).map((value) => ({
-      description: `prompt command ${value}`,
-      value,
-    })),
-    ...collectMatches(
-      contents,
-      /sandcastle\([^)]+\): #\{\{[A-Z][A-Z0-9_]*\}\}: <short message>/g
-    ).map((value) => ({
-      description: `artifact prefix ${value}`,
-      value,
-    })),
-    ...collectMatches(
-      contents,
-      /<phase-outcome>[a-z-]+<\/phase-outcome>|<\/?phase-detail>|<promise>COMPLETE<\/promise>/g
-    ).map((value) => ({
-      description: `terminal marker ${value}`,
-      value,
-    })),
-  ];
-
-  return [
-    ...new Map(
-      elements.map((element) => [
-        `${element.description}\0${element.value}`,
-        element,
-      ])
-    ).values(),
-  ];
-}
 
 export async function requireProjectCodingStandards(
   projectRoot: string
@@ -82,62 +38,49 @@ async function resolvePromptSelection(options: {
   filename: PromptFilename;
   projectRoot: string;
   workflowRoot: string;
-  workflowVersion: string;
 }): Promise<PromptSelection> {
-  const { filename, projectRoot, workflowRoot, workflowVersion } = options;
+  const { filename, projectRoot, workflowRoot } = options;
   const builtInPath = await requireReadableRegularFile(
     path.join(workflowRoot, "defaults", "prompts", filename),
     `Built-in prompt ${filename}`
   );
-  const overridePath = path.join(projectRoot, ".sandcastle", filename);
+  const guidancePath = path.join(projectRoot, ".sandcastle", filename);
 
   try {
-    await lstat(overridePath);
+    await lstat(guidancePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { filename, path: builtInPath, source: "built-in" };
+      return { filename, path: builtInPath, guidance: "" };
     }
-    throw new Error(`Could not inspect prompt override ${filename}.`, {
+    throw new Error(`Could not inspect project guidance ${filename}.`, {
       cause: error,
     });
   }
 
-  const resolvedOverridePath = await requireReadableRegularFile(
-    overridePath,
-    `Prompt override ${filename}`
+  const resolvedGuidancePath = await requireReadableRegularFile(
+    guidancePath,
+    `Project guidance ${filename}`
   );
-  if (!isWithinDirectory(projectRoot, resolvedOverridePath)) {
+  if (!isWithinDirectory(projectRoot, resolvedGuidancePath)) {
     throw new Error(
-      `Prompt override ${filename} resolves outside the active Git worktree: ${resolvedOverridePath}.`
-    );
-  }
-
-  const [builtInContents, overrideContents] = await Promise.all([
-    readFile(builtInPath, "utf8"),
-    readFile(resolvedOverridePath, "utf8"),
-  ]);
-  const missingElements = extractPromptContract(builtInContents).filter(
-    (element) => !overrideContents.includes(element.value)
-  );
-  if (missingElements.length > 0) {
-    throw new Error(
-      `Prompt override ${filename} is incompatible with Sandcastle workflow version ${workflowVersion}. Missing contract elements: ${missingElements.map((element) => element.description).join("; ")}.`
+      `Project guidance ${filename} resolves outside the active Git worktree: ${resolvedGuidancePath}.`
     );
   }
 
   return {
     filename,
-    path: resolvedOverridePath,
-    source: "project override",
+    path: builtInPath,
+    guidance: await readFile(resolvedGuidancePath, "utf8"),
+    guidancePath: resolvedGuidancePath,
   };
 }
 
 export async function resolvePromptFiles(options: {
   projectRoot: string;
   workflowRoot: string;
-  workflowVersion: string;
 }): Promise<{
   get: (filename: PromptFilename) => string;
+  getGuidance: (filename: PromptFilename) => string;
   selections: readonly PromptSelection[];
 }> {
   const canonicalProjectRoot = await realpath(options.projectRoot);
@@ -150,17 +93,24 @@ export async function resolvePromptFiles(options: {
       })
     )
   );
-  const paths = new Map(
-    selections.map((selection) => [selection.filename, selection.path])
+  const selectionByFilename = new Map(
+    selections.map((selection) => [selection.filename, selection])
   );
+
+  function getSelection(filename: PromptFilename): PromptSelection {
+    const selection = selectionByFilename.get(filename);
+    if (selection === undefined) {
+      throw new Error(`No prompt selection exists for ${filename}.`);
+    }
+    return selection;
+  }
 
   return {
     get(filename): string {
-      const promptPath = paths.get(filename);
-      if (promptPath === undefined) {
-        throw new Error(`No prompt selection exists for ${filename}.`);
-      }
-      return promptPath;
+      return getSelection(filename).path;
+    },
+    getGuidance(filename): string {
+      return getSelection(filename).guidance;
     },
     selections,
   };

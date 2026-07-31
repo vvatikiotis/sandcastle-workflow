@@ -11,7 +11,7 @@ The package is private and local-only:
 - distribution: reviewed `.tgz` tarballs committed by consumers under `vendor/`
 - registry publication, workspace links, adjacent checkouts, and source-directory installation: unsupported
 
-The package owns executable code and read-only defaults. Consumer repositories own configuration, credentials, prompt and Dockerfile overrides, logs, worktrees, dependency overlays, active-run locks, and merger recovery state.
+The package owns executable code and read-only defaults. Consumer repositories own configuration, credentials, project prompt guidance, Dockerfile overrides, logs, worktrees, dependency overlays, active-run locks, and merger recovery state.
 
 Preserve the GitHub-native control plane in ADR-0001. Treat `CONTEXT.md`, `CODING_STANDARDS.md`, `docs/adr/`, and its index as authoritative; ADR files and the index are read-only during implementation.
 
@@ -132,4 +132,4 @@ A consumer updates by replacing its vendored artifact and lockfile entry:
 pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.1.1.tgz
 ```
 
-Consumers must run help, version, initialization, image building, and dry run before a normal workflow. A new package version can invalidate project prompt overrides and changes derived Docker image names. The consumer must build the new image explicitly unless it uses `DOCKER_IMAGE`.
+Consumers must run help, version, initialization, image building, and dry run before a normal workflow. A new package version can make project prompt guidance obsolete or conflicting and changes derived Docker image names. The consumer must build the new image explicitly unless it uses `DOCKER_IMAGE`.

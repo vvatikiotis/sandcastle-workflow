@@ -220,7 +220,6 @@ async function discoverProjectRoot(): Promise<string> {
 
 const projectRoot = await discoverProjectRoot();
 const workflowRoot = path.dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_VERSION = packageVersion;
 const isDryRun = command === "dry-run";
 
 if (command === "init") {
@@ -578,15 +577,12 @@ const AGENT_CONFIG = {
 } as const;
 
 await requireProjectCodingStandards(projectRoot);
-const promptFiles = await resolvePromptFiles({
-  projectRoot,
-  workflowRoot,
-  workflowVersion: WORKFLOW_VERSION,
-});
+const promptFiles = await resolvePromptFiles({ projectRoot, workflowRoot });
 for (const selection of promptFiles.selections) {
-  console.log(
-    `Prompt ${selection.filename}: ${selection.source} ${selection.path}`
-  );
+  console.log(`Prompt ${selection.filename}: built-in ${selection.path}`);
+  if (selection.guidancePath !== undefined) {
+    console.log(`Project guidance ${selection.filename}: ${selection.guidancePath}`);
+  }
 }
 
 const agentEnvironmentPath = projectPath(".sandcastle", ".env");
@@ -1567,6 +1563,7 @@ async function runFinalSpecReview(
           branchStrategy: { type: "head" },
           promptFile: promptFiles.get("final-spec-prompt.md"),
           promptArgs: {
+            PROJECT_GUIDANCE: promptFiles.getGuidance("final-spec-prompt.md"),
             SPEC_ISSUE_ID: specIssueId,
           },
           logging: { type: "file", path: logPath },
@@ -1845,6 +1842,9 @@ async function runStandaloneIssue(
             promptArgs: {
               ...verificationPromptArgs,
               ISSUE_ID: issue.id,
+              PROJECT_GUIDANCE: promptFiles.getGuidance(
+                "standalone-implement-prompt.md"
+              ),
             },
             logging: { type: "file", path: logPath },
           }),
@@ -1923,6 +1923,9 @@ async function runStandaloneIssue(
               BASE_COMMIT: baseSnapshot.commit,
               BRANCH: branch,
               ISSUE_ID: issue.id,
+              PROJECT_GUIDANCE: promptFiles.getGuidance(
+                "standalone-review-prompt.md"
+              ),
             },
             logging: { type: "file", path: reviewLogPath },
           }),
@@ -2069,6 +2072,9 @@ async function runStandaloneIssue(
                 BASE_COMMIT: baseSnapshot.commit,
                 BRANCH: branch,
                 ISSUE_ID: issue.id,
+                PROJECT_GUIDANCE: promptFiles.getGuidance(
+                  "standalone-merge-prompt.md"
+                ),
                 VERIFICATION_WORKTREE_PATH:
                   verificationWorktreePaths.sandboxPath,
               },
@@ -2627,6 +2633,9 @@ if (recoverySucceeded) {
               promptArgs: {
                 ...verificationPromptArgs,
                 ISSUE_ID: plannedIssue.id,
+                PROJECT_GUIDANCE: promptFiles.getGuidance(
+                  "implement-prompt.md"
+                ),
                 SPEC_ISSUE_ID: selectedSpec.id,
               },
               logging: { type: "file", path: logPath },
@@ -2706,6 +2715,9 @@ if (recoverySucceeded) {
                 BASE_COMMIT: baseSnapshot.commit,
                 BRANCH: branch,
                 ISSUE_ID: plannedIssue.id,
+                PROJECT_GUIDANCE: promptFiles.getGuidance(
+                  "review-prompt.md"
+                ),
                 SPEC_ISSUE_ID: selectedSpec.id,
               },
               logging: { type: "file", path: reviewLogPath },
@@ -2871,6 +2883,7 @@ if (recoverySucceeded) {
                   BASE_COMMIT: baseSnapshot.commit,
                   BRANCH: branch,
                   ISSUE_ID: plannedIssue.id,
+                  PROJECT_GUIDANCE: promptFiles.getGuidance("merge-prompt.md"),
                   SPEC_ISSUE_ID: selectedSpec.id,
                   VERIFICATION_WORKTREE_PATH:
                     verificationWorktreePaths.sandboxPath,
