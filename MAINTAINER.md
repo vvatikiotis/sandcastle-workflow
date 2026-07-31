@@ -11,7 +11,7 @@ The package is private and local-only:
 - distribution: reviewed `.tgz` tarballs committed by consumers under `vendor/`
 - registry publication, workspace links, adjacent checkouts, and source-directory installation: unsupported
 
-The package owns executable code and read-only defaults. Consumer repositories own configuration, credentials, prompt and Dockerfile overrides, logs, worktrees, dependency overlays, and merger recovery state.
+The package owns executable code and read-only defaults. Consumer repositories own configuration, credentials, prompt and Dockerfile overrides, logs, worktrees, dependency overlays, active-run locks, and merger recovery state.
 
 Preserve the GitHub-native control plane in ADR-0001. Treat `CONTEXT.md`, `CODING_STANDARDS.md`, `docs/adr/`, and its index as authoritative; ADR files and the index are read-only during implementation.
 
@@ -96,7 +96,7 @@ tar -tzf artifacts/vvatikiotis-sandcastle-workflow-0.1.1.tgz
 sha256sum artifacts/vvatikiotis-sandcastle-workflow-0.1.1.tgz
 ```
 
-Confirm that the tarball excludes source, tests, development configuration, credentials, active consumer configuration, logs, worktrees, overlays, recovery state, and unrelated repository files.
+Confirm that the tarball excludes source, tests, development configuration, credentials, active consumer configuration, logs, worktrees, overlays, active-run locks, recovery state, and unrelated repository files.
 
 ## Release checklist
 

@@ -8,6 +8,7 @@ const ignoreContents = [
   "worktrees/",
   "node-modules-overlays/",
   "merger-recovery.json",
+  "run.lock",
   "",
 ].join("\n");
 
