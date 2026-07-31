@@ -82,6 +82,7 @@ import { cleanupVerificationWorktree } from "./verification-worktree-cleanup.ts"
 import { getVerificationWorktreePaths } from "./verification-worktree-paths.ts";
 import { resolveDockerfile, resolveDockerImageName } from "./docker-image.ts";
 import { resolvePackageManager } from "./package-manager.ts";
+import { acquireRunLock, type RunLock } from "./run-lock.ts";
 
 type CliMode =
   | "run"
@@ -705,6 +706,7 @@ async function validateEffectiveIgnoreBehavior(): Promise<void> {
     ".sandcastle/worktrees/",
     ".sandcastle/node-modules-overlays/",
     ".sandcastle/merger-recovery.json",
+    ".sandcastle/run.lock",
   ];
   const { stdout: trackedProtectedPathsOutput } = await execFile("git", [
     "ls-files",
@@ -2217,8 +2219,10 @@ async function runStandaloneIssue(
 let runSpecIssueId: string | undefined;
 let workPath: WorkPath | undefined;
 let skippedStaleStandaloneSelection = false;
+let runLock: RunLock | undefined;
 
 if (!isDryRun) {
+  runLock = await acquireRunLock(projectPath(".sandcastle", "run.lock"));
   const staleOverlayCleanup = await cleanupStaleNodeModulesOverlays(
     nodeModulesOverlayRoot
   );
@@ -3069,6 +3073,19 @@ if (recoverySucceeded) {
 //
 // region Process completion
 //
+
+if (runLock !== undefined) {
+  try {
+    await runLock.release();
+  } catch (error) {
+    console.error(`ERROR: ${formatDiagnostic(error)}`);
+    runEndStatus = {
+      kind: "aborted",
+      reason: "The workflow finished, but its active-run lock could not be released safely.",
+    };
+    process.exitCode = 1;
+  }
+}
 
 if (runEndStatus.kind === "stopped" && !process.exitCode) {
   process.exitCode = 3;

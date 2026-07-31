@@ -307,6 +307,7 @@ describe("packed CLI", () => {
       "/worktrees/",
       "/node-modules-overlays/",
       "/merger-recovery.json",
+      "/run.lock",
     ]) {
       assert.equal(entries.some((entry) => entry.includes(forbidden)), false);
     }
@@ -396,7 +397,10 @@ describe("packed CLI", () => {
     const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
     const examplePath = path.join(sandcastleRoot, "sandcastle.env.example");
     assert.match(await readFile(examplePath, "utf8"), /IMPLEMENTER_MODEL=/);
-    await access(path.join(sandcastleRoot, ".gitignore"));
+    assert.match(
+      await readFile(path.join(sandcastleRoot, ".gitignore"), "utf8"),
+      /^run\.lock$/m
+    );
     await access(path.join(sandcastleRoot, ".env.example"));
     await assert.rejects(access(path.join(sandcastleRoot, "sandcastle.env")));
     await assert.rejects(access(path.join(sandcastleRoot, ".env")));
@@ -551,6 +555,9 @@ describe("packed CLI", () => {
       if (manager.startsWith("pnpm")) {
         await mkdir(staleOverlay, { recursive: true });
       }
+      const runLockPath = path.join(consumerRoot, ".sandcastle", "run.lock");
+      const existingLock = '{"pid":99999999,"startedAt":"2026-01-01T00:00:00.000Z"}\n';
+      await writeFile(runLockPath, existingLock);
       const result = await run(shim, ["--dry-run"], {
         cwd: consumerRoot,
         env: {
@@ -570,6 +577,7 @@ describe("packed CLI", () => {
       if (manager.startsWith("pnpm")) {
         await access(staleOverlay);
       }
+      assert.equal(await readFile(runLockPath, "utf8"), existingLock);
     });
   }
 
@@ -879,19 +887,37 @@ fi
       await chmod(dockerPath, 0o755);
       const hookPath = await installFakeSandcastleBoundary(consumerRoot);
       const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
+      const environment = {
+        ...process.env,
+        FAKE_SANDCASTLE_CAPTURE: capturePath,
+        ISSUE_STATE: issueStatePath,
+        NODE_OPTIONS: `--import=${hookPath}`,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      };
+      const runLockPath = path.join(consumerRoot, ".sandcastle", "run.lock");
+      const existingLock = '{"pid":99999999,"startedAt":"2026-01-01T00:00:00.000Z"}\n';
+      await writeFile(runLockPath, existingLock);
+      await assert.rejects(
+        run(shim, [], { cwd: consumerRoot, env: environment }),
+        (error) => {
+          assert.equal(error.code, 1);
+          assert.match(error.stderr, /Another Sandcastle workflow run already owns/);
+          assert.match(error.stderr, /confirmed-stale lock/);
+          return true;
+        }
+      );
+      assert.equal(await readFile(runLockPath, "utf8"), existingLock);
+      assert.equal((await readFile(issueStatePath, "utf8")).trim(), "OPEN");
+      await assert.rejects(access(capturePath));
+      await rm(runLockPath);
 
       const packageFingerprint = await fingerprintInstalledPackage(consumerRoot);
       const result = await run(shim, [], {
         cwd: consumerRoot,
-        env: {
-          ...process.env,
-          FAKE_SANDCASTLE_CAPTURE: capturePath,
-          ISSUE_STATE: issueStatePath,
-          NODE_OPTIONS: `--import=${hookPath}`,
-          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
-        },
+        env: environment,
       });
 
+      await assert.rejects(access(runLockPath));
       assert.match(result.stdout, /Selected standalone issue #42/);
       assert.match(result.stdout, /Standalone merge complete/);
       assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);

@@ -68,6 +68,18 @@ Help and version work outside Git. All operational commands discover the active 
 | `3` | Stopped safely and requires follow-up |
 | `129`, `130`, `143` | SIGHUP, SIGINT, or SIGTERM |
 
+## Concurrent runs
+
+A Consumer Repository supports one active mutating workflow run. Before cleanup, recovery, branch changes, issue changes, or agent launch, a normal run exclusively creates `.sandcastle/run.lock`. A second normal run stops without changing workflow state.
+
+The lock records the host process ID and UTC start time. Normal completion removes it. Signals, crashes, and unexpected failures preserve it because child processes or recovery work may still exist. Inspect the recorded process and workflow state before manually removing a confirmed-stale lock. Never remove a live run's lock.
+
+Read-only `--dry-run`, `--help`, and `--version` do not acquire or remove the lock. Initialization and image building also remain outside the workflow lock.
+
+Different Consumer Repositories have independent locks and may run concurrently. If their directory names are the same, their derived Docker image names collide. Configure a distinct `DOCKER_IMAGE` in each repository before building images or running those workflows concurrently.
+
+Consumers initialized before active-run locking was introduced must add `run.lock` to `.sandcastle/.gitignore`. New initialization includes this rule automatically.
+
 ## Initialize a consumer
 
 Run from the Git root or a nested directory:
@@ -174,6 +186,7 @@ Workflow-owned state remains beneath the consumer's `.sandcastle` directory:
 - issue worktrees
 - dependency overlays
 - merger recovery state
+- active-run ownership lock
 
 The installed package is treated as read-only. This guarantee does not restrict agent activity. Agent containers intentionally receive writable worktrees, network access, and `GH_TOKEN`; agents can create commits and branches and mutate GitHub issues within the workflow. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes. Diagnostics do not print credential values.
 
