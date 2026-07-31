@@ -375,7 +375,8 @@ async function loadRunnerConfig(): Promise<RunnerConfig> {
 const runnerConfig = await loadRunnerConfig();
 const dockerImageName = resolveDockerImageName(
   runnerConfig.DOCKER_IMAGE,
-  projectRoot
+  projectRoot,
+  packageVersion
 );
 const dockerfile = await resolveDockerfile({ projectRoot, workflowRoot });
 
