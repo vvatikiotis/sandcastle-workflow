@@ -190,6 +190,10 @@ console.error = (...values) =>
 // endregion Run completion reporting
 //
 
+//
+// region CLI and project bootstrap
+//
+
 async function discoverProjectRoot(): Promise<string> {
   try {
     const { stdout } = await rawExecFile(
@@ -285,7 +289,15 @@ const verificationPromptArgs = {
 };
 
 //
+// endregion CLI and project bootstrap
+//
+
+//
 // region Configuration
+//
+
+//
+// region Runner configuration
 //
 
 const runnerConfigPath = projectPath(".sandcastle", "sandcastle.env");
@@ -409,12 +421,33 @@ async function loadRunnerConfig(): Promise<RunnerConfig> {
 }
 
 const runnerConfig = await loadRunnerConfig();
+
+//
+// endregion Runner configuration
+//
+
+//
+// region Docker configuration
+//
+
 const dockerImageName = resolveDockerImageName(
   runnerConfig.DOCKER_IMAGE,
   projectRoot,
   packageVersion
 );
 const dockerfile = await resolveDockerfile({ projectRoot, workflowRoot });
+
+//
+// endregion Docker configuration
+//
+
+//
+// endregion Configuration
+//
+
+//
+// region Build-image command
+//
 
 if (command === "build-image") {
   const uid = process.getuid?.() ?? 1000;
@@ -443,6 +476,18 @@ if (command === "build-image") {
   await runCompletion.printSummary();
   process.exit(0);
 }
+
+//
+// endregion Build-image command
+//
+
+//
+// region Project preflight
+//
+
+//
+// region GitHub preflight
+//
 
 async function validateGitHubRepository(): Promise<void> {
   const { stdout: remoteUrlOutput } = await execFile("git", [
@@ -491,6 +536,14 @@ async function validateGitHubRepository(): Promise<void> {
 }
 
 await validateGitHubRepository();
+
+//
+// endregion GitHub preflight
+//
+
+//
+// region Agent and prompt preflight
+//
 
 const maxIterations = Number(runnerConfig.MAX_ITERATIONS);
 if (
@@ -608,6 +661,14 @@ async function loadAgentEnvironment(): Promise<Record<string, string>> {
 
 const agentEnvironment = isDryRun ? {} : await loadAgentEnvironment();
 
+//
+// endregion Agent and prompt preflight
+//
+
+//
+// region Git ignore preflight
+//
+
 async function isEffectivelyIgnored(
   projectRelativePath: string
 ): Promise<boolean> {
@@ -693,7 +754,11 @@ async function validateEffectiveIgnoreBehavior(): Promise<void> {
 await validateEffectiveIgnoreBehavior();
 
 //
-// endregion Configuration
+// endregion Git ignore preflight
+//
+
+//
+// endregion Project preflight
 //
 
 //
@@ -3001,8 +3066,16 @@ if (recoverySucceeded) {
 // endregion Main iteration loop
 //
 
+//
+// region Process completion
+//
+
 if (runEndStatus.kind === "stopped" && !process.exitCode) {
   process.exitCode = 3;
 }
 
 await runCompletion.printSummary();
+
+//
+// endregion Process completion
+//
