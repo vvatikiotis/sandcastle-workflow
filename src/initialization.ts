@@ -131,7 +131,8 @@ export async function initializeProject(
 
 export function reportInitialization(
   result: InitializationResult,
-  projectRoot: string
+  projectRoot: string,
+  relationshipSkillPath: string
 ): void {
   console.log(`Sandcastle project root: ${projectRoot}`);
   for (const filePath of result.created) {
@@ -146,5 +147,12 @@ export function reportInitialization(
   );
   console.log(
     "2. Copy .sandcastle/.env.example to .sandcastle/.env and set GH_TOKEN before launching agents."
+  );
+  console.log(
+    "3. Configure the GitHub relationship skill project-locally before using an agent to publish spec children."
+  );
+  console.log(`   Packaged skill: ${relationshipSkillPath}`);
+  console.log(
+    "   Recommended project link: .agents/skills/github-ticket-relationships"
   );
 }

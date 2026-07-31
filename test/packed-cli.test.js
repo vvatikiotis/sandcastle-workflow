@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,6 +107,15 @@ describe("packed CLI", () => {
 
     assert.equal(entries.some((entry) => entry.startsWith("package/src/")), false);
     assert.equal(entries.some((entry) => entry.startsWith("package/test/")), false);
+
+    const { stdout: manifestText } = await run("tar", [
+      "-xOf",
+      tarballPath,
+      "package/package.json",
+    ]);
+    const manifest = JSON.parse(manifestText);
+    assert.deepEqual(manifest.bin, { "sandcastle-workflow": "dist/cli.js" });
+    assert.equal("pi" in manifest, false);
   });
 
   for (const manager of ["npm", "pnpm"]) {
@@ -123,6 +143,51 @@ describe("packed CLI", () => {
       assert.equal(installedPackageRoot.startsWith(packageRoot), false);
     });
   }
+
+  it("initializes a nested consumer safely and preserves existing files", async () => {
+    const consumerRoot = await installConsumer("pnpm-init");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const nestedRoot = path.join(consumerRoot, "nested", "directory");
+    await mkdir(nestedRoot, { recursive: true });
+    const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+
+    const first = await run(shim, ["init"], { cwd: nestedRoot });
+    assert.match(first.stdout, new RegExp(`Sandcastle project root: ${consumerRoot}`));
+    assert.match(first.stdout, /Configure the GitHub relationship skill project-locally/);
+    assert.match(
+      first.stdout,
+      /node_modules\/@vvatikiotis\/sandcastle-workflow\/skills\/github-ticket-relationships/
+    );
+
+    const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
+    const examplePath = path.join(sandcastleRoot, "sandcastle.env.example");
+    assert.match(await readFile(examplePath, "utf8"), /IMPLEMENTER_MODEL=/);
+    await access(path.join(sandcastleRoot, ".gitignore"));
+    await access(path.join(sandcastleRoot, ".env.example"));
+    await assert.rejects(access(path.join(sandcastleRoot, "sandcastle.env")));
+    await assert.rejects(access(path.join(sandcastleRoot, ".env")));
+
+    await writeFile(examplePath, "project-owned\n");
+    const second = await run(shim, ["init"], { cwd: consumerRoot });
+    assert.match(second.stdout, new RegExp(`Preserved ${examplePath}`));
+    assert.equal(await readFile(examplePath, "utf8"), "project-owned\n");
+  });
+
+  it("refuses to initialize through a symbolic project directory", async () => {
+    const consumerRoot = await installConsumer("pnpm-symlink");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const outsideRoot = path.join(tempRoot, "outside-sandcastle");
+    await mkdir(outsideRoot);
+    await symlink(outsideRoot, path.join(consumerRoot, ".sandcastle"));
+    const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+
+    await assert.rejects(run(shim, ["init"], { cwd: consumerRoot }), (error) => {
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, /Refusing to initialize through symbolic Sandcastle directory/);
+      return true;
+    });
+    assert.deepEqual(await readdir(outsideRoot), []);
+  });
 
   it("rejects invalid usage before requiring a Git worktree", async () => {
     const consumerRoot = await installConsumer("pnpm-invalid");
