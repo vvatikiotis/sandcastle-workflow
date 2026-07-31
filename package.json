@@ -1,0 +1,40 @@
+{
+  "name": "@vvatikiotis/sandcastle-workflow",
+  "version": "0.1.0",
+  "description": "Packaged GitHub-native Sandcastle workflow",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "sandcastle-workflow": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup && node scripts/copy-assets.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run test:unit && pnpm run test:package",
+    "test:unit": "tsx --test test/agent-run-status.test.js test/node-modules-overlay.test.js test/phase-diagnostics.test.js test/recovery-routing.test.js test/spec-selection.test.js test/verification-worktree-cleanup.test.js",
+    "test:package": "node --test test/packed-cli.test.js",
+    "test:docker": "tsx --test test/verification-worktree-cleanup.docker.js",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "@ai-hero/sandcastle": "0.12.0",
+    "chalk": "~5.6.2",
+    "zod": "~4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
