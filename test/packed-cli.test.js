@@ -47,6 +47,7 @@ async function run(file, args, options = {}) {
 }
 
 async function installConsumer(manager) {
+  const managerFamily = manager.startsWith("npm") ? "npm" : "pnpm";
   const consumerRoot = path.join(tempRoot, manager);
   const vendorRoot = path.join(consumerRoot, "vendor");
   await mkdir(vendorRoot, { recursive: true });
@@ -58,7 +59,12 @@ async function installConsumer(manager) {
       {
         name: `${manager}-consumer`,
         private: true,
-        packageManager: manager === "npm" ? "npm@10.9.2" : "pnpm@11.10.0",
+        packageManager:
+          managerFamily === "npm" ? "npm@10.9.2" : "pnpm@11.10.0",
+        scripts: {
+          test: "node --test",
+          typecheck: "node --check index.js",
+        },
         devDependencies: {
           [packageName]: `file:vendor/${path.basename(tarballPath)}`,
         },
@@ -68,7 +74,7 @@ async function installConsumer(manager) {
     )}\n`
   );
 
-  if (manager === "npm") {
+  if (managerFamily === "npm") {
     await run("npx", ["--yes", "npm@10.9.2", "install", "--ignore-scripts"], {
       cwd: consumerRoot,
     });
@@ -77,6 +83,48 @@ async function installConsumer(manager) {
   }
 
   return consumerRoot;
+}
+
+async function prepareDryRunConsumer(manager) {
+  const consumerRoot = await installConsumer(manager);
+  const shim = path.join(consumerRoot, "node_modules", ".bin", "sandcastle-workflow");
+  await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+  await run("git", ["config", "user.email", "test@example.com"], {
+    cwd: consumerRoot,
+  });
+  await run("git", ["config", "user.name", "Test"], { cwd: consumerRoot });
+  await run("git", ["remote", "add", "origin", "https://github.com/example/project.git"], {
+    cwd: consumerRoot,
+  });
+  await run(shim, ["init"], { cwd: consumerRoot });
+  await writeFile(path.join(consumerRoot, "CODING_STANDARDS.md"), "# Standards\n");
+  await writeFile(path.join(consumerRoot, "index.js"), "export {};\n");
+  await writeFile(path.join(consumerRoot, ".gitignore"), "node_modules/\n");
+  await writeFile(
+    path.join(consumerRoot, ".sandcastle", "sandcastle.env"),
+    `${validRunnerConfig}\n`
+  );
+  await run("git", ["add", "."], { cwd: consumerRoot });
+  await run("git", ["commit", "--quiet", "-m", "fixture"], { cwd: consumerRoot });
+
+  const binRoot = path.join(consumerRoot, "bin");
+  await mkdir(binRoot);
+  const ghPath = path.join(binRoot, "gh");
+  await writeFile(
+    ghPath,
+    `#!/bin/sh
+if [ "$1 $2" = "label list" ]; then
+  printf '%s\\n' '[{"name":"needs-triage"},{"name":"needs-info"},{"name":"ready-for-agent"},{"name":"ready-for-human"},{"name":"wontfix"}]'
+elif [ "$1 $2" = "issue list" ]; then
+  printf '%s\\n' '[]'
+else
+  echo "unexpected gh arguments: $*" >&2
+  exit 1
+fi
+`
+  );
+  await chmod(ghPath, 0o755);
+  return { consumerRoot, shim, binRoot, ghPath };
 }
 
 describe("packed CLI", () => {
@@ -308,6 +356,178 @@ describe("packed CLI", () => {
         assert.equal(error.code, 1);
         assert.match(error.stderr, /exceeds Docker's 128-character limit/);
         assert.match(error.stderr, /Configure DOCKER_IMAGE explicitly/);
+        return true;
+      }
+    );
+  });
+
+  for (const manager of ["npm-dry-run", "pnpm-dry-run"]) {
+    it(`performs a read-only dry run for a valid ${manager.split("-")[0]} consumer`, async () => {
+      const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(manager);
+      const result = await run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      });
+
+      assert.match(result.stdout, /No open ready-for-agent issues found/);
+      assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+      await assert.rejects(
+        access(path.join(consumerRoot, ".sandcastle", "logs"))
+      );
+      await assert.rejects(
+        access(path.join(consumerRoot, ".sandcastle", "worktrees"))
+      );
+    });
+  }
+
+  it("rejects a package-manager and lockfile mismatch before GitHub access", async () => {
+    const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+      "pnpm-manager-mismatch"
+    );
+    const manifestPath = path.join(consumerRoot, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.packageManager = "npm@10.9.2";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    await assert.rejects(
+      run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /npm requires package-lock\.json/);
+        return true;
+      }
+    );
+  });
+
+  it("accepts one supported lockfile when packageManager is absent", async () => {
+    const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+      "pnpm-lockfile-fallback"
+    );
+    const manifestPath = path.join(consumerRoot, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    delete manifest.packageManager;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await run("git", ["add", "package.json"], { cwd: consumerRoot });
+    await run("git", ["commit", "--quiet", "-m", "use lockfile fallback"], {
+      cwd: consumerRoot,
+    });
+
+    const result = await run(shim, ["--dry-run"], {
+      cwd: consumerRoot,
+      env: {
+        ...process.env,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      },
+    });
+    assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+  });
+
+  it("rejects ambiguous and unsupported package-manager evidence", async () => {
+    const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+      "pnpm-manager-invalid"
+    );
+    const manifestPath = path.join(consumerRoot, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const runDry = () =>
+      run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      });
+
+    await writeFile(path.join(consumerRoot, "package-lock.json"), "{}\n");
+    await assert.rejects(runDry(), (error) => {
+      assert.match(error.stderr, /both package-lock\.json and pnpm-lock\.yaml/);
+      return true;
+    });
+    await rm(path.join(consumerRoot, "package-lock.json"));
+
+    manifest.packageManager = "yarn@4.0.0";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await assert.rejects(runDry(), (error) => {
+      assert.match(error.stderr, /Unsupported or malformed consumer packageManager/);
+      return true;
+    });
+
+    manifest.packageManager = "pnpm@10.0.0";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await assert.rejects(runDry(), (error) => {
+      assert.match(error.stderr, /supports pnpm 11/);
+      return true;
+    });
+  });
+
+  it("fails preflight when required GitHub labels are missing", async () => {
+    const { consumerRoot, shim, binRoot, ghPath } = await prepareDryRunConsumer(
+      "pnpm-missing-labels"
+    );
+    await writeFile(
+      ghPath,
+      '#!/bin/sh\nif [ "$1 $2" = "label list" ]; then printf "[]\\n"; else exit 1; fi\n'
+    );
+    await chmod(ghPath, 0o755);
+
+    await assert.rejects(
+      run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /missing required triage labels/);
+        return true;
+      }
+    );
+  });
+
+  it("uses safe-stop exit status 3 for an invalid native issue graph", async () => {
+    const { consumerRoot, shim, binRoot, ghPath } = await prepareDryRunConsumer(
+      "pnpm-invalid-graph"
+    );
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+if [ "$1 $2" = "label list" ]; then
+  printf '%s\\n' '[{"name":"needs-triage"},{"name":"needs-info"},{"name":"ready-for-agent"},{"name":"ready-for-human"},{"name":"wontfix"}]'
+elif [ "$1 $2" = "issue list" ]; then
+  printf '%s\\n' '[{"id":"1","title":"Spec","createdAt":"2026-01-01T00:00:00Z","parentId":null},{"id":"2","title":"Child","createdAt":"2026-01-01T00:01:00Z","parentId":"1"}]'
+elif [ "$1" = "api" ]; then
+  printf '%s\\n' '[{"number":2,"title":"Child","state":"open","labels":[{"name":"ready-for-agent"}]}]'
+elif [ "$1 $2" = "issue view" ]; then
+  printf '%s\\n' '{"parent":{"number":3},"blockedBy":{"nodes":[]},"blocking":{"nodes":[]}}'
+else
+  exit 1
+fi
+`
+    );
+    await chmod(ghPath, 0o755);
+
+    await assert.rejects(
+      run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 3);
+        assert.match(error.stdout, /SANDCASTLE RUN: STOPPED/);
+        assert.match(error.stdout, /sub-issue validation failed/);
         return true;
       }
     );
