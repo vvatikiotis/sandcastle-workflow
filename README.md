@@ -129,7 +129,7 @@ Native GitHub relationships determine all executable work:
 - one specification is selected per invocation;
 - final review runs only after every direct child closes.
 
-Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.1.0` assumes no more than 100 simultaneously eligible issues. GitHub limits a parent to 100 direct sub-issues.
+Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.1.0` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
 
 The package includes the optional Agent Skills-standard `github-ticket-relationships` skill. Configure it project-locally before asking an agent to publish tickets. For harnesses that discover `.agents/skills`, commit a relative symbolic link from `.agents/skills/github-ticket-relationships` to the installed package's skill directory. Initialization prints the installed source path but does not create the link or modify agent settings.
 

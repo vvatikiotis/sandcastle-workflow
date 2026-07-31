@@ -436,6 +436,10 @@ describe("packed CLI", () => {
 
     assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.1\.0/);
     assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
+    assert.match(
+      result.stdout,
+      /Build arguments: AGENT_UID=\d+, AGENT_GID=\d+/
+    );
     const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
     const fileIndex = dockerArguments.indexOf("--file");
     const tagIndex = dockerArguments.indexOf("--tag");
