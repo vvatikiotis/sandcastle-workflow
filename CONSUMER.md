@@ -143,17 +143,23 @@ The package includes the optional Agent Skills-standard `github-ticket-relations
 
 Humans and other tools can create the same graph with GitHub CLI: attach each child natively to its parent, add each approved child dependency from the blocked child, and make every child block its parent. Verify the resulting parent, blockers, and blocking edges before running Sandcastle.
 
-## Prompts and project overrides
+## Prompts and project guidance
 
-The package ships seven defaults:
+The package always runs its seven built-in prompts. A consumer may add phase-specific guidance by placing one of these fixed filenames directly under `.sandcastle`:
 
-- spec-child implementation, review, and merge
-- standalone implementation, review, and merge
-- final specification review
+- `implement-prompt.md`
+- `review-prompt.md`
+- `merge-prompt.md`
+- `standalone-implement-prompt.md`
+- `standalone-review-prompt.md`
+- `standalone-merge-prompt.md`
+- `final-spec-prompt.md`
 
-A consumer can override one prompt by placing its fixed filename directly under `.sandcastle`. Other phases keep packaged defaults. Overrides must be readable regular files inside the Git worktree. A symbolic link is accepted only when its resolved target remains inside that worktree.
+Each file supplies only additional project instructions for its matching phase. Sandcastle inserts the contents into the packaged prompt before a final mandatory policy and completion block. Project guidance cannot replace the packaged workflow, selected issue scope, safety rules, attribution rules, or completion protocol.
 
-Preflight checks every override against the matching installed prompt contract. An incompatible override fails with its filename, missing contract elements, and installed package version. Sandcastle does not rewrite, migrate, ignore, or silently replace project prompts. Manager-neutral verification placeholders allow one override to work with npm or pnpm.
+Guidance files must be readable regular files inside the Git worktree. A symbolic link is accepted only when its resolved target remains inside that worktree. Sandcastle does not interpret placeholders or require packaged prompt markers in project guidance.
+
+Consumers that previously copied a complete built-in prompt into `.sandcastle` must replace that copy with only their additional project instructions. Otherwise, the agent receives a redundant full prompt as project guidance.
 
 ## Docker image
 
@@ -194,4 +200,4 @@ Merger verification keeps host and container paths separate. Host Git, recovery,
 
 ## Upgrade
 
-Replace the committed tarball and update the consumer lockfile together. Run help, version, initialization, image building, and dry run before a normal workflow. A package upgrade can invalidate a project prompt override; preflight reports the missing contract rather than migrating it. Derived Docker image names include package version, so a new release requires an explicit image build unless `DOCKER_IMAGE` is configured.
+Replace the committed tarball and update the consumer lockfile together. Run help, version, initialization, image building, and dry run before a normal workflow. A package upgrade can change packaged prompt rules; review project guidance for conflicts or obsolete instructions before running agents. Derived Docker image names include package version, so a new release requires an explicit image build unless `DOCKER_IMAGE` is configured.
