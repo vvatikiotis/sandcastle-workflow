@@ -25,3 +25,5 @@ await rm(outputDefaults, { recursive: true, force: true });
 await mkdir(outputDefaults, { recursive: true });
 await cp(sourceDefaults, outputDefaults, { recursive: true });
 await chmod(path.resolve("dist", "cli.js"), 0o755);
+await cp(path.resolve("src", "setup.sh"), path.resolve("dist", "setup.sh"));
+await chmod(path.resolve("dist", "setup.sh"), 0o755);
