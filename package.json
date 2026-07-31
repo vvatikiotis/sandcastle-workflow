@@ -15,7 +15,9 @@
   "files": [
     "dist",
     "skills",
-    "README.md"
+    "README.md",
+    "CONSUMER.md",
+    "MAINTAINER.md"
   ],
   "scripts": {
     "build": "tsup && node scripts/copy-assets.mjs",
@@ -24,6 +26,7 @@
     "test:unit": "tsx --test test/agent-run-status.test.js test/node-modules-overlay.test.js test/phase-diagnostics.test.js test/recovery-routing.test.js test/spec-selection.test.js test/verification-worktree-cleanup.test.js",
     "test:package": "node --test test/packed-cli.test.js",
     "test:docker": "tsx --test test/verification-worktree-cleanup.docker.js",
+    "pack:artifact": "pnpm pack --pack-destination artifacts",
     "prepack": "pnpm run build"
   },
   "dependencies": {
