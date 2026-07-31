@@ -34,6 +34,7 @@ const agentEnvironmentExample = [
   "# Create a fine-grained token: https://github.com/settings/personal-access-tokens/new",
   "# Required repository permissions: Issues (Read and write) and Metadata (Read)",
   "# Leave empty to use a non-empty GH_TOKEN from the host environment.",
+  "# Additional keys are unsupported and stop normal-run preflight.",
   "GH_TOKEN=",
   "",
 ].join("\n");
@@ -51,7 +52,7 @@ async function createSandcastleDirectory(
   sandcastleRoot: string
 ): Promise<"created" | "preserved"> {
   try {
-    await mkdir(sandcastleRoot);
+    await mkdir(sandcastleRoot, { mode: 0o700 });
     return "created";
   } catch (error) {
     if (!hasErrorCode(error, "EEXIST")) {

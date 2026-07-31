@@ -169,7 +169,12 @@ async function installFakeSandcastleBoundary(consumerRoot) {
   await writeFile(
     fakeModulePath,
     `import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import {
+  appendFileSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
 
 function capture(value) {
   appendFileSync(process.env.FAKE_SANDCASTLE_CAPTURE, JSON.stringify(value) + "\\n");
@@ -206,9 +211,16 @@ export async function createSandbox(options) {
         name: runOptions.name,
         promptArgs: runOptions.promptArgs,
         promptFile: runOptions.promptFile,
+        logMode: statSync(runOptions.logging.path).mode & 0o777,
       });
       if (runOptions.name.includes("implementer")) {
         addCommit(options.cwd, options.branch, "sandcastle(implementer): #42: fake implementation");
+        if (process.env.RECOVERY_SYMLINK_TARGET) {
+          symlinkSync(
+            process.env.RECOVERY_SYMLINK_TARGET,
+            options.cwd + "/.sandcastle/merger-recovery.json"
+          );
+        }
         return { stdout: "<phase-outcome>implemented</phase-outcome>\\n<promise>COMPLETE</promise>" };
       }
       return { stdout: "<phase-outcome>approved</phase-outcome>\\n<promise>COMPLETE</promise>" };
@@ -220,12 +232,20 @@ export async function createSandbox(options) {
 }
 
 export async function run(options) {
+  const recoveryPath = options.cwd + "/.sandcastle/merger-recovery.json";
   capture({
     type: "phase",
     name: options.name,
     promptArgs: options.promptArgs,
     promptFile: options.promptFile,
     hooks: options.hooks,
+    logMode: statSync(options.logging.path).mode & 0o777,
+    recoveryMode: options.name.includes("merger")
+      ? statSync(recoveryPath).mode & 0o777
+      : undefined,
+    recoveryState: options.name.includes("merger")
+      ? JSON.parse(readFileSync(recoveryPath, "utf8"))
+      : undefined,
   });
   if (options.name.includes("final-spec-reviewer")) {
     execFileSync("gh", ["issue", "close", options.promptArgs.SPEC_ISSUE_ID], { cwd: options.cwd });
@@ -885,13 +905,85 @@ fi
       await chmod(dockerPath, 0o755);
       const hookPath = await installFakeSandcastleBoundary(consumerRoot);
       const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
+      const recoverySymlinkTarget = path.join(
+        consumerRoot,
+        "recovery-symlink-target"
+      );
+      await writeFile(recoverySymlinkTarget, "do not overwrite\n");
       const environment = {
         ...process.env,
         FAKE_SANDCASTLE_CAPTURE: capturePath,
         ISSUE_STATE: issueStatePath,
         NODE_OPTIONS: `--import=${hookPath}`,
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        RECOVERY_SYMLINK_TARGET: recoverySymlinkTarget,
       };
+      const agentEnvironmentPath = path.join(
+        consumerRoot,
+        ".sandcastle",
+        ".env"
+      );
+      await writeFile(
+        agentEnvironmentPath,
+        "GH_TOKEN=test-token\nDATABASE_PASSWORD=secret\n"
+      );
+      await assert.rejects(
+        run(shim, [], { cwd: consumerRoot, env: environment }),
+        (error) => {
+          assert.equal(error.code, 1);
+          assert.match(error.stderr, /unsupported agent environment key DATABASE_PASSWORD/);
+          assert.match(error.stderr, /Only GH_TOKEN is supported/);
+          return true;
+        }
+      );
+      assert.equal((await readFile(issueStatePath, "utf8")).trim(), "OPEN");
+      await assert.rejects(access(capturePath));
+      await writeFile(agentEnvironmentPath, "GH_TOKEN=test-token\n");
+
+      const recoveryWorktreeRoot = path.join(
+        consumerRoot,
+        ".sandcastle",
+        "worktrees"
+      );
+      const redirectedWorktreePath = path.join(
+        recoveryWorktreeRoot,
+        "sandcastle-merger-verify-issue-42"
+      );
+      const outsideRecoveryRoot = path.join(consumerRoot, "outside-recovery");
+      await mkdir(recoveryWorktreeRoot, { recursive: true });
+      await mkdir(outsideRecoveryRoot);
+      await symlink(outsideRecoveryRoot, redirectedWorktreePath);
+      const recoveryMarkerPath = path.join(
+        consumerRoot,
+        ".sandcastle",
+        "merger-recovery.json"
+      );
+      await writeFile(
+        recoveryMarkerPath,
+        JSON.stringify({
+          baseBranch: "main",
+          reviewedBranch: "sandcastle/issue-42",
+          verificationWorktreePath: redirectedWorktreePath,
+        })
+      );
+      await assert.rejects(
+        run(shim, [], { cwd: consumerRoot, env: environment }),
+        (error) => {
+          assert.equal(error.code, 1);
+          assert.match(
+            `${error.stdout}\n${error.stderr}`,
+            /Recovery worktree must be a real directory/
+          );
+          return true;
+        }
+      );
+      assert.equal((await readFile(issueStatePath, "utf8")).trim(), "OPEN");
+      await assert.rejects(access(capturePath));
+      await access(recoveryMarkerPath);
+      await rm(redirectedWorktreePath);
+      await rm(outsideRecoveryRoot, { recursive: true });
+      await rm(recoveryMarkerPath);
+
       const runLockPath = path.join(consumerRoot, ".sandcastle", "run.lock");
       const existingLock = '{"pid":99999999,"startedAt":"2026-01-01T00:00:00.000Z"}\n';
       await writeFile(runLockPath, existingLock);
@@ -916,6 +1008,7 @@ fi
       });
 
       await assert.rejects(access(runLockPath));
+      assert.equal(await readFile(recoverySymlinkTarget, "utf8"), "do not overwrite\n");
       assert.match(result.stdout, /Selected standalone issue #42/);
       assert.match(result.stdout, /Standalone merge complete/);
       assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
@@ -961,7 +1054,25 @@ fi
         sandbox.hooks.sandbox.onSandboxReady.at(-1).command,
         expected.INSTALL_COMMAND
       );
+      const phases = captures.filter((entry) => entry.type === "phase");
+      assert.equal(phases.every((entry) => entry.logMode === 0o600), true);
+      assert.equal(
+        (await stat(path.join(consumerRoot, ".sandcastle"))).mode & 0o777,
+        0o700
+      );
+      assert.equal(
+        (await stat(path.join(consumerRoot, ".sandcastle", "logs"))).mode &
+          0o777,
+        0o700
+      );
       const merger = captures.find((entry) => entry.name?.includes("merger"));
+      assert.equal(merger.recoveryMode, 0o600);
+      assert.equal(merger.recoveryState.baseBranch, "main");
+      assert.equal(merger.recoveryState.reviewedBranch, "sandcastle/issue-42");
+      assert.match(
+        merger.recoveryState.verificationWorktreePath,
+        /\.sandcastle\/worktrees\/sandcastle-merger-verify-issue-42$/
+      );
       assert.match(
         merger.promptArgs.VERIFICATION_WORKTREE_PATH,
         /^\/home\/agent\/workspace\/\.sandcastle\/worktrees\//
