@@ -276,6 +276,10 @@ describe("packed CLI", () => {
       if (promptName.includes("merge")) {
         assert.match(prompt, /\{\{INSTALL_COMMAND\}\}/);
       }
+      if (promptName === "implement-prompt.md") {
+        assert.doesNotMatch(prompt, /gh issue list --state open/);
+        assert.match(prompt, /gh issue view \{\{ISSUE_ID\}\}/);
+      }
     }
 
     const { stdout: manifestText } = await run("tar", [
@@ -804,6 +808,80 @@ fi
       );
     });
   }
+
+  it("executes one native spec child without agent-side work selection", async () => {
+    const { consumerRoot, shim, binRoot, ghPath } = await prepareDryRunConsumer(
+      "pnpm-spec-child"
+    );
+    await writeFile(
+      path.join(consumerRoot, ".sandcastle", ".env"),
+      "GH_TOKEN=test-token\n"
+    );
+    const issueStatePath = path.join(consumerRoot, "issue-state");
+    await writeFile(issueStatePath, "OPEN\n");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+if [ "$1 $2" = "label list" ]; then
+  printf '%s\\n' '[{"name":"needs-triage"},{"name":"needs-info"},{"name":"ready-for-agent"},{"name":"ready-for-human"},{"name":"wontfix"}]'
+elif [ "$1 $2" = "issue list" ]; then
+  printf '%s\\n' '[{"id":"100","title":"Spec","createdAt":"2026-01-01T00:00:00Z","parentId":null},{"id":"101","title":"Child","createdAt":"2026-01-01T00:01:00Z","parentId":"100"}]'
+elif [ "$1" = "api" ]; then
+  if printf '%s\\n' "$2" | grep -q '/issues/100/sub_issues'; then
+    printf '%s\\n' '[{"number":101,"title":"Child","state":"open","labels":[{"name":"ready-for-agent"}]}]'
+  else
+    printf '[]\\n'
+  fi
+elif [ "$1 $2" = "issue view" ]; then
+  if printf '%s\\n' "$*" | grep -q -- '--json state'; then
+    cat "$ISSUE_STATE"
+  elif [ "$3" = "101" ]; then
+    printf '%s\\n' '{"parent":{"number":100},"blockedBy":{"nodes":[]},"blocking":{"nodes":[{"number":100}]}}'
+  else
+    printf '%s\\n' '{"parent":null,"blockedBy":{"nodes":[{"number":101}]},"blocking":{"nodes":[]}}'
+  fi
+elif [ "$1 $2" = "issue close" ]; then
+  printf 'CLOSED\\n' > "$ISSUE_STATE"
+else
+  echo "unexpected gh arguments: $*" >&2
+  exit 1
+fi
+`
+    );
+    await chmod(ghPath, 0o755);
+    const dockerPath = path.join(binRoot, "docker");
+    await writeFile(
+      dockerPath,
+      '#!/bin/sh\nif [ "$1 $2" = "image inspect" ]; then exit 0; fi\nexit 1\n'
+    );
+    await chmod(dockerPath, 0o755);
+    const hookPath = await installFakeSandcastleBoundary(consumerRoot);
+    const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
+
+    const result = await run(shim, [], {
+      cwd: consumerRoot,
+      env: {
+        ...process.env,
+        FAKE_SANDCASTLE_CAPTURE: capturePath,
+        ISSUE_STATE: issueStatePath,
+        NODE_OPTIONS: `--import=${hookPath}`,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    assert.match(result.stdout, /Selected issue #101: Child/);
+    assert.match(result.stdout, /Merge complete/);
+    assert.equal((await readFile(issueStatePath, "utf8")).trim(), "CLOSED");
+    const captures = (await readFile(capturePath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const implementer = captures.find((entry) =>
+      entry.name?.startsWith("implementer:")
+    );
+    assert.equal(implementer.promptArgs.ISSUE_ID, "101");
+    assert.equal(implementer.promptArgs.SPEC_ISSUE_ID, "100");
+  });
 
   it("refuses to initialize through a symbolic project directory", async () => {
     const consumerRoot = await installConsumer("pnpm-symlink");

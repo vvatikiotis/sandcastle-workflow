@@ -1,14 +1,6 @@
-# Context
-
-## Open issues
-
-!`gh issue list --state open --label ready-for-agent --limit 100 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
-
-The list above is the sole source for which issue this agent may work on. Do not run your own unfiltered query to select more issues — if the list is empty, there is nothing to do.
-
 # Task
 
-You are the implementer in the workflow.
+You are the implementer for the issue selected by deterministic Sandcastle orchestration. Do not query for or select different work.
 
 ## GitHub comments
 
@@ -18,11 +10,7 @@ Every GitHub issue comment you create MUST begin with:
 
 Replace `<short message>` with a concise description. This includes comments for blockers, failures, missing context, and completion. Do not create an agent comment without this Sandcastle, agent, and issue attribution. Any other Git or GitHub artifact you create must identify Sandcastle, the agent role, the issue number when available, and a concise message.
 
-Work only on issue `{{ISSUE_ID}}` from the ready-for-agent issue list above. Do not pick a different issue.
-
-The selected parent spec is issue `{{SPEC_ISSUE_ID}}`. Work only on its selected child issue; do not work on another spec or its children.
-
-Sandcastle selected this issue from the parent spec's native GitHub sub-issues. Use the issue list only as supporting context.
+Work only on issue `{{ISSUE_ID}}`. The selected parent spec is issue `{{SPEC_ISSUE_ID}}`. Do not work on another issue, spec, or child.
 
 ## Workflow
 
