@@ -80,6 +80,7 @@ import { initializeProject, reportInitialization } from "./initialization.ts";
 import { cleanupVerificationWorktree } from "./verification-worktree-cleanup.ts";
 import { getVerificationWorktreePaths } from "./verification-worktree-paths.ts";
 import { resolveDockerfile, resolveDockerImageName } from "./docker-image.ts";
+import { resolvePackageManager } from "./package-manager.ts";
 
 type CliMode =
   | "run"
@@ -248,6 +249,8 @@ function execFile(file: string, args: readonly string[]) {
   });
 }
 
+const packageManager = await resolvePackageManager(projectRoot);
+
 //
 // region Configuration
 //
@@ -406,6 +409,54 @@ if (command === "build-image") {
   await runCompletion.printSummary();
   process.exit(0);
 }
+
+async function validateGitHubRepository(): Promise<void> {
+  const { stdout: remoteUrlOutput } = await execFile("git", [
+    "remote",
+    "get-url",
+    "origin",
+  ]);
+  const remoteUrl = remoteUrlOutput.trim();
+  if (
+    !/^(?:https:\/\/github\.com\/|git@github\.com:)[^/]+\/[^/]+(?:\.git)?$/.test(
+      remoteUrl
+    )
+  ) {
+    throw new Error(
+      `Sandcastle version 0.1.0 supports only GitHub.com origin remotes. Found: ${remoteUrl || "none"}.`
+    );
+  }
+
+  const { stdout: labelsOutput } = await execFile("gh", [
+    "label",
+    "list",
+    "--limit",
+    "100",
+    "--json",
+    "name",
+  ]);
+  const labels = z
+    .array(z.object({ name: z.string() }))
+    .parse(JSON.parse(labelsOutput));
+  const availableLabels = new Set(labels.map((label) => label.name));
+  const requiredLabels = [
+    "needs-triage",
+    "needs-info",
+    "ready-for-agent",
+    "ready-for-human",
+    "wontfix",
+  ];
+  const missingLabels = requiredLabels.filter(
+    (label) => !availableLabels.has(label)
+  );
+  if (missingLabels.length > 0) {
+    throw new Error(
+      `The GitHub repository is missing required triage labels: ${missingLabels.join(", ")}.`
+    );
+  }
+}
+
+await validateGitHubRepository();
 
 const maxIterations = Number(runnerConfig.MAX_ITERATIONS);
 if (
@@ -637,7 +688,10 @@ const authHook = {
 // Hooks run inside the sandbox before the agent starts each iteration.
 const dependencyHooks = {
   sandbox: {
-    onSandboxReady: [authHook, { command: "pnpm install --frozen-lockfile" }],
+    onSandboxReady: [
+      authHook,
+      { command: packageManager.commands.install.join(" ") },
+    ],
   },
 };
 
@@ -2875,5 +2929,9 @@ if (await recoverInterruptedMerger()) {
 //
 // endregion Main iteration loop
 //
+
+if (runEndStatus.kind === "stopped" && !process.exitCode) {
+  process.exitCode = 3;
+}
 
 await runCompletion.printSummary();
