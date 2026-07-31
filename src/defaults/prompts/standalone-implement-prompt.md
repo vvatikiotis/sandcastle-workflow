@@ -13,10 +13,10 @@ Do not close the issue.
 ## Workflow
 
 1. Run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. Confirm the issue has no parent and no open blockers. If an open blocker exists, comment with its IDs and stop without changing labels or code.
-2. Read issue `{{ISSUE_ID}}`, `CONTEXT.md`, applicable ADRs, relevant source files, and tests.
+2. Read issue `{{ISSUE_ID}}`, relevant source files, tests, and any project `CONTEXT.md` or applicable ADRs that exist.
 3. State assumptions, the implementation seam, and verification criteria before editing.
 4. Implement only the standalone issue requirements. Use behavior-level tests when a practical seam exists.
-5. Run `pnpm typecheck` and `pnpm test`, or the strongest relevant checks for documentation/configuration work.
+5. Run `{{TYPECHECK_COMMAND}}` and `{{TEST_COMMAND}}`, or the strongest relevant checks for documentation/configuration work.
 6. Treat ADRs and `docs/adr/README.md` as read-only.
 7. Commit all implementation changes in one commit with exactly:
 

@@ -28,10 +28,10 @@ Sandcastle selected this issue from the parent spec's native GitHub sub-issues. 
 
 1. **Recheck dependencies** — run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. If GitHub now reports an open blocker, comment on the issue with the blocker IDs and stop without changing labels, committing, or implementing. `main.ts` already validated the native sub-issue graph; this is only a race-condition guard.
 2. **Orient** — read issue `{{ISSUE_ID}}` carefully. Read parent spec issue `{{SPEC_ISSUE_ID}}` and linked ADRs.
-3. **Explore** — read the relevant source files and tests before writing any code. Treat child-issue acceptance criteria, parent spec requirements, existing behavior-level public interfaces, `CONTEXT.md`, linked ADRs, and external-system boundaries as pre-approved test seams.
+3. **Explore** — read the relevant source files and tests before writing any code. Treat child-issue acceptance criteria, parent spec requirements, existing behavior-level public interfaces, external-system boundaries, and any project `CONTEXT.md` or linked ADRs that exist as pre-approved test seams.
 4. **Plan** — state the assumptions, intended seam, and concrete verification criteria. Keep the change as small as possible.
 5. **Execute** — use RGR (Red → Green → Repeat → Refactor) when a behavior change has a practical, stable seam: write one failing behavior-level test, implement only enough to pass it, and repeat. Do not test private helpers, internal call ordering, or mocked internal collaborators.
-6. **Verify** — run `pnpm typecheck` and `pnpm test` before committing. For documentation, configuration, migration, or other work with no meaningful behavior-level test, state why in the issue comment, then run the strongest relevant checks.
+6. **Verify** — run `{{TYPECHECK_COMMAND}}` and `{{TEST_COMMAND}}` before committing. For documentation, configuration, migration, or other work with no meaningful behavior-level test, state why in the issue comment, then run the strongest relevant checks.
 7. **ADR conformance** — treat ADRs and `docs/adr/README.md` as read-only. Verify that the implementation conforms to them. Do not create, edit, delete, rename, move, or revert ADR files or their index.
 8. **Commit** — include the implementation in one git commit. The commit title MUST be exactly:
    `sandcastle(implementer): #{{ISSUE_ID}}: <short message>`
