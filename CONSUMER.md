@@ -227,6 +227,25 @@ Treat workflow logs as sensitive. They contain complete agent messages, exact ag
 
 Merger recovery state contains branch names, the issue-derived reviewed branch, and an absolute host worktree path. It does not intentionally contain credentials or source content.
 
+### Log retention and cleanup
+
+Sandcastle does not delete workflow logs automatically. Logs remain under `.sandcastle/logs` until the Consumer Repository owner removes them. This preserves audit evidence after successful, stopped, aborted, and interrupted runs.
+
+Before deleting logs, confirm that no workflow is active and that retained logs are no longer needed for merger recovery, incident review, or debugging:
+
+```bash
+test ! -e .sandcastle/run.lock
+find .sandcastle/logs -type f -name 'sandcastle-*.log' -print
+```
+
+After reviewing the printed paths, remove only Sandcastle log files:
+
+```bash
+find .sandcastle/logs -type f -name 'sandcastle-*.log' -exec rm -- {} +
+```
+
+This cleanup does not remove worktrees, overlays, locks, recovery markers, configuration, credentials, or project files. Sandcastle does not manage the host user's `~/.codex/sessions` retention because that directory is shared with Codex activity outside this workflow. Apply the host's Codex retention and backup policy separately.
+
 The installed package is treated as read-only. This guarantee does not restrict agent activity. Agent containers intentionally receive writable worktrees, network access, and `GH_TOKEN`; agents can create commits and branches and mutate GitHub issues within the workflow. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes.
 
 Merger verification keeps host and container paths separate. Host Git, recovery, and cleanup use absolute host paths. Prompts and dependency mounts use `/home/agent/workspace/...` paths.
