@@ -2,6 +2,19 @@
 
 This guide explains how to develop, qualify, package, and release the local Sandcastle Workflow artifact.
 
+## Development and release flow
+
+Follow these steps in order. Later sections define the checks and release invariants in detail.
+
+1. **Prepare the checkout** — install the pinned dependencies from [Prerequisites](#prerequisites) and confirm the existing test suite passes.
+2. **Make one focused change** — preserve the [package boundary](#package-boundary), ADR-0001, workflow-state protections, and the packaged-executable test seam.
+3. **Verify during development** — run `pnpm typecheck` and `pnpm test`. Run the real-Docker regression when the change affects sandbox mounts, worktrees, cleanup, or Docker behavior. See [Development checks](#development-checks).
+4. **Choose the release version** — classify the change using [Versioning](#versioning), then update the package version and current-version references before creating an artifact.
+5. **Qualify the release** — run every command under [Build and qualify an artifact](#build-and-qualify-an-artifact). A failed or skipped required check is not successful qualification.
+6. **Inspect and identify the artifact** — inspect the tarball allowlist, confirm sensitive and development files are absent, and record its SHA-256 checksum.
+7. **Commit and tag one release unit** — commit source, tests, documentation, generated output, artifact, and checksum together; then create the matching Git tag. Follow the [Release checklist](#release-checklist).
+8. **Provide migration instructions** — tell consumers which tarball and checksum to use, how to update their lockfile, and which initialization, image, or guidance changes require attention. See [Consumer migration](#consumer-migration).
+
 ## Package boundary
 
 The package is private and local-only:
