@@ -282,6 +282,8 @@ describe("packed CLI", () => {
 
     const expectedEntries = [
       "package/README.md",
+      "package/CONSUMER.md",
+      "package/MAINTAINER.md",
       "package/dist/cli.js",
       "package/dist/defaults/docker/Dockerfile",
       "package/dist/defaults/prompts/final-spec-prompt.md",
