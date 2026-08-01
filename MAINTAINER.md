@@ -52,7 +52,7 @@ Keep the relationship skill available to the owner through an untracked local sy
 
 ## Release and artifact policy
 
-There is no release process. Do not run `pnpm pack`, `pnpm run pack:artifact`, create tarballs, calculate release checksums, tag versions for distribution, or publish to npm or another registry. Version changes are unnecessary unless they affect local diagnostics or compatibility.
+There is no distribution release process. Do not create or share release tarballs, calculate release checksums, tag versions for distribution, or publish to npm or another registry. The test suite may create a temporary tarball in the system temporary directory for the packed-executable regression; that artifact must not be copied into either repository or retained. Version changes are unnecessary unless they affect local diagnostics or compatibility.
 
 If a temporary local tarball is needed for debugging, keep it outside both repositories and remove it afterward. It must never be committed or copied to a consumer repository.
 
