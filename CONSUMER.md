@@ -2,24 +2,128 @@
 
 This guide explains how to install and run `@vvatikiotis/sandcastle-workflow` in a consuming repository.
 
-## Setup and run
+## Quick start
 
-Follow these steps in order. The linked sections define the requirements and recovery rules for each step.
+These steps install version `0.2.1` in a new pnpm consumer.
 
-1. **Check support** — confirm the repository and host meet the [supported environment](#supported-environment) and [consumer contract](#consumer-contract).
-2. **Install the reviewed artifact** — copy the tarball into `vendor/`, install it as a development dependency, and commit the tarball, package manifest, and lockfile together. See [Install a reviewed tarball](#install-a-reviewed-tarball).
-3. **Initialize Sandcastle** — run `sandcastle-workflow init`. See [Initialize a consumer](#initialize-a-consumer).
-4. **Configure the runner and credentials** — copy both generated examples to their active names, choose the model and iteration settings, and provide `GH_TOKEN`.
-5. **Configure ticket relationships** — install the relationship-skill symbolic link and add the required instruction to the repository's `AGENTS.md`. See [GitHub control plane](#github-control-plane).
-6. **Prepare GitHub** — create the required labels, then publish and verify native sub-issue and dependency relationships.
-7. **Build the agent image** — configure `DOCKER_IMAGE` when needed, then run `sandcastle-workflow build-image`. See [Docker image](#docker-image).
-8. **Validate without mutation** — run `sandcastle-workflow --dry-run` and resolve every reported preflight or relationship error.
-9. **Run the workflow** — run `sandcastle-workflow`. Review its completion status and retained state before rerunning after a stop or failure.
-10. **Upgrade deliberately** — replace the artifact and lockfile entry together, rebuild the image, and repeat validation. See [Upgrade](#upgrade).
+1. **Create the repository**
+
+   ```bash
+   git init
+   pnpm init
+   ```
+
+   Skip this step when the consumer repository already exists.
+
+2. **Prepare the consumer**
+
+   Add working, non-empty `test` and `typecheck` scripts to `package.json`. Add a `CODING_STANDARDS.md` file with the project rules agents must follow.
+
+3. **Copy and verify the reviewed artifact**
+
+   ```bash
+   mkdir vendor
+   cp /path/to/vvatikiotis-sandcastle-workflow-0.2.1.tgz vendor/
+   ```
+
+   On macOS:
+
+   ```bash
+   shasum -a 256 vendor/vvatikiotis-sandcastle-workflow-0.2.1.tgz
+   ```
+
+   On Linux:
+
+   ```bash
+   sha256sum vendor/vvatikiotis-sandcastle-workflow-0.2.1.tgz
+   ```
+
+   Compare the output with the checksum supplied with the reviewed artifact.
+
+4. **Install the workflow**
+
+   ```bash
+   pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.2.1.tgz
+   ```
+
+5. **Add Sandcastle scripts**
+
+   Add these entries to `package.json`:
+
+   ```json
+   {
+     "scripts": {
+       "sandcastle:setup": "sandcastle-workflow-setup",
+       "sandcastle": "sandcastle-workflow",
+       "sandcastle:dry-run": "sandcastle-workflow --dry-run"
+     }
+   }
+   ```
+
+6. **Run guided setup**
+
+   ```bash
+   pnpm sandcastle:setup
+   ```
+
+   It creates missing examples and preserves active configuration that already exists.
+
+7. **Configure runner settings and credentials**
+
+   Edit these files and set the required values, including `GH_TOKEN`:
+
+   ```text
+   .sandcastle/sandcastle.env
+   .sandcastle/.env
+   ```
+
+8. **Expose the ticket-relationship skill**
+
+   ```bash
+   mkdir -p .agents/skills
+   ln -s ../../node_modules/@vvatikiotis/sandcastle-workflow/skills/github-ticket-relationships \
+     .agents/skills/github-ticket-relationships
+   ```
+
+   Add this instruction to `AGENTS.md`:
+
+   ```markdown
+   Before publishing child issues for a GitHub spec, load
+   `.agents/skills/github-ticket-relationships/SKILL.md` after the spec issue
+   exists to create native sub-issue and dependency relationships.
+   ```
+
+   Commit the tarball, package manifest, lockfile, `.sandcastle` examples, relative symbolic link, `AGENTS.md`, and `CODING_STANDARDS.md` together. Never commit `.sandcastle/.env` or `.sandcastle/sandcastle.env`.
+
+9. **Prepare GitHub work**
+
+   ```bash
+   git remote add origin git@github.com:OWNER/REPOSITORY.git
+   gh auth status
+   ```
+
+   Create the required labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. Then create an eligible standalone issue, or use the installed relationship skill to publish and verify a specification with its child and dependency relationships.
+
+10. **Build and validate**
+
+   ```bash
+   pnpm sandcastle build-image
+   pnpm sandcastle:dry-run
+   ```
+
+   The dry run checks the consumer and GitHub setup without starting agents.
+
+11. **Run Sandcastle**
+
+   ```bash
+   pnpm sandcastle
+   ```
+
+   This starts the normal workflow and can launch agents.
 
 ## Supported environment
 
-Version `0.2.0` supports:
+Version `0.2.1` supports:
 
 - Node.js 22 or newer on macOS and Linux
 - npm 10 or pnpm 11 repositories
@@ -28,56 +132,41 @@ Version `0.2.0` supports:
 - Docker sandboxes
 - Codex runtime agents
 
-The package is local-only. Consumers commit a reviewed tarball under `vendor/` and install it as a development dependency.
+The package is private and local-only. Consumers commit a reviewed tarball under `vendor/` and install it as a development dependency. Collaborators with access to the consumer repository receive that artifact.
 
-## Install a reviewed tarball
+## npm installation
 
-Copy the artifact into the consuming repository:
-
-```text
-vendor/vvatikiotis-sandcastle-workflow-0.2.0.tgz
-```
-
-With pnpm:
+The quick start uses pnpm. With npm, install the same reviewed artifact as a relative file dependency:
 
 ```bash
-pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.2.0.tgz
+npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.2.1.tgz
 ```
 
-With npm:
+Use these npm commands in place of the pnpm quick-start commands:
 
 ```bash
-npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.2.0.tgz
+npm run sandcastle:setup
+npm run sandcastle -- build-image
+npm run sandcastle:dry-run
+npm run sandcastle
 ```
 
-The relative file dependency keeps clean installs independent of an adjacent package checkout. Commit the tarball, package manifest, and lockfile together. Initialization never edits consumer package metadata.
-
-An optional project script can provide guided setup and shorter commands:
-
-```json
-{
-  "scripts": {
-    "sandcastle:setup": "sandcastle-workflow-setup",
-    "sandcastle": "sandcastle-workflow",
-    "sandcastle:dry-run": "sandcastle-workflow --dry-run"
-  }
-}
-```
-
-Run `npm run sandcastle:setup` or `pnpm sandcastle:setup` from the repository. It uses a portable POSIX shell script, asks before creating active configuration, and runs initialization first. The existing `sandcastle-workflow init` command remains available for non-interactive use.
+The setup command uses a portable POSIX shell script, asks before creating active configuration, and runs initialization first.
 
 ## Commands and exit statuses
 
+Use the configured pnpm scripts:
+
 ```text
-sandcastle-workflow
-sandcastle-workflow init
-sandcastle-workflow build-image
-sandcastle-workflow --dry-run
-sandcastle-workflow --help
-sandcastle-workflow --version
+pnpm sandcastle
+pnpm sandcastle init
+pnpm sandcastle build-image
+pnpm sandcastle:dry-run
+pnpm sandcastle --help
+pnpm sandcastle --version
 ```
 
-Help and version work outside Git. All operational commands discover the active Git worktree root and do not change the process working directory.
+The underlying executable's help and version options do not require a Git worktree. Operational commands discover the active Git worktree root and do not change the process working directory.
 
 | Status | Meaning |
 | --- | --- |
@@ -89,51 +178,43 @@ Help and version work outside Git. All operational commands discover the active 
 
 ## Concurrent runs
 
-A Consumer Repository supports one active mutating workflow run. Before cleanup, recovery, branch changes, issue changes, or agent launch, a normal run exclusively creates `.sandcastle/run.lock`. A second normal run stops without changing workflow state.
+A Consumer Repository supports one active mutating workflow run. A normal run owns `.sandcastle/run.lock`; a second normal run stops without changing workflow state. Normal completion removes the lock. Signals, crashes, and unexpected failures preserve it. Do not remove a lock until the recorded process and workflow state confirm that it is stale.
 
-The lock records the host process ID and UTC start time. Normal completion removes it. Signals, crashes, and unexpected failures preserve it because child processes or recovery work may still exist. Inspect the recorded process and workflow state before manually removing a confirmed-stale lock. Never remove a live run's lock.
-
-Read-only `--dry-run`, `--help`, and `--version` do not acquire or remove the lock. Initialization and image building also remain outside the workflow lock.
-
-Different Consumer Repositories have independent locks and may run concurrently. If their directory names are the same, their derived Docker image names collide. Configure a distinct `DOCKER_IMAGE` in each repository before building images or running those workflows concurrently.
-
-Consumers initialized before active-run locking was introduced must add `run.lock` to `.sandcastle/.gitignore`. New initialization includes this rule automatically.
+`--dry-run`, `--help`, `--version`, initialization, and image building do not use the lock. Repositories have independent locks. New initialization adds `run.lock` to `.sandcastle/.gitignore`.
 
 ## Initialize a consumer
 
-Run from the Git root or a nested directory:
+This is the non-interactive alternative to quick-start step 6:
 
 ```bash
-sandcastle-workflow init
+pnpm sandcastle init
 ```
 
-Initialization creates without overwriting:
-
-- `.sandcastle/.gitignore`
-- `.sandcastle/sandcastle.env.example`
-- `.sandcastle/.env.example`
-
-Copy the examples to their active ignored names and choose every value explicitly:
+Run it from the Git root or a nested directory. It creates, without overwriting, `.sandcastle/.gitignore`, `.sandcastle/sandcastle.env.example`, and `.sandcastle/.env.example`. When running it directly, copy both examples to their active ignored names and choose every value explicitly:
 
 ```bash
 cp .sandcastle/sandcastle.env.example .sandcastle/sandcastle.env
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
-The runner configuration selects models, effort, maximum iterations, and an optional Docker image. The agent environment supports only `GH_TOKEN`; an empty declaration uses a non-empty host value. Any other key in `.sandcastle/.env` stops normal-run preflight before an agent starts. Initialization does not create credentials, active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, overlays, or recovery state.
+The runner configuration selects models, effort, maximum iterations, and an optional Docker image. The agent environment supports only `GH_TOKEN`; an empty declaration uses a non-empty host value. Any other key stops normal-run preflight. Initialization does not create active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, overlays, or recovery state.
 
 ## Consumer contract
+
+Meet this contract before completing quick-start step 10.
 
 The Git root must contain:
 
 - `package.json` with non-empty `test` and `typecheck` scripts
 - exactly one supported lockfile
 - `CODING_STANDARDS.md`
+- `.agents/skills/github-ticket-relationships` linked to the installed package skill
+- `AGENTS.md` with the instruction that tells agents when to load that skill
 - a GitHub.com `origin` remote and working GitHub CLI authentication
 - a GitHub CLI release that supports the native `parent`, `blockedBy`, and `blocking` issue fields; update the CLI if relationship preflight reports an unsupported field
 - labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`
 
-`AGENTS.md`, `CONTEXT.md`, and project ADRs are optional. Prompts use them only when present.
+`CONTEXT.md` and project ADRs are optional. Prompts use them only when present.
 
 A declared `packageManager` must identify npm 10 or pnpm 11 and match its lockfile. Without a declaration, `package-lock.json` selects npm and `pnpm-lock.yaml` selects pnpm. Both lockfiles, missing lockfiles, npm shrinkwrap, unsupported managers, unsupported majors, and malformed declarations fail preflight.
 
@@ -149,6 +230,8 @@ Monorepositories are supported only when package metadata, lockfile, configurati
 
 ## GitHub control plane
 
+Quick-start step 8 makes the relationship skill discoverable, and step 9 prepares GitHub work. Complete both before the dry run in step 10.
+
 Native GitHub relationships determine all executable work:
 
 - direct sub-issues define a specification's children;
@@ -157,21 +240,9 @@ Native GitHub relationships determine all executable work:
 - one specification is selected per invocation;
 - final review runs only after every direct child closes.
 
-Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.2.0` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
+Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.2.1` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
 
-The package includes the optional Agent Skills-standard `github-ticket-relationships` skill. Configure it project-locally before asking an agent to publish tickets. For harnesses that discover `.agents/skills`, commit a relative symbolic link from `.agents/skills/github-ticket-relationships` to the installed package's skill directory. Initialization prints the installed source path but does not create the link or modify agent settings.
-
-Add this instruction to the consuming repository's `AGENTS.md` so agents know when to load the skill:
-
-```markdown
-## GitHub ticket relationships
-
-Before publishing child issues for a GitHub spec, load
-`.agents/skills/github-ticket-relationships/SKILL.md` after the spec issue
-exists to create native sub-issue and dependency relationships.
-```
-
-The symbolic link makes the skill discoverable; the `AGENTS.md` instruction tells agents when to use it. Both are required before agents publish a spec's child issues.
+The package includes the required Agent Skills-standard `github-ticket-relationships` skill. Step 8 configures it project-locally. The symbolic link makes the skill discoverable, and the `AGENTS.md` instruction tells agents when to use it. Both are required consumer setup. Initialization prints the installed source path but does not create the link or modify agent settings.
 
 Humans and other tools can create the same graph with GitHub CLI: attach each child natively to its parent, add each approved child dependency from the blocked child, and make every child block its parent. Verify the resulting parent, blockers, and blocking edges before running Sandcastle.
 
@@ -195,66 +266,51 @@ Consumers that previously copied a complete built-in prompt into `.sandcastle` m
 
 ## Docker image
 
-Build explicitly:
-
-```bash
-sandcastle-workflow build-image
-```
-
 Normal runs inspect the image before the first agent launch and never build it automatically.
 
 Without `DOCKER_IMAGE`, the package derives `sandcastle:<project>-v<package-version>`. Repositories with the same directory name can collide; set `DOCKER_IMAGE` to avoid that rare case. An overlong generated tag fails rather than being truncated or hashed.
 
 The packaged Dockerfile uses its own minimal build context. A contained `.sandcastle/Dockerfile` override takes precedence and uses the Git root as context.
 
-The default Dockerfile installs `@openai/codex@latest`. This is intentionally nondeterministic:
-
-- rebuilding the same package version can install a different Codex release;
-- Docker layer caching can retain an older release despite `latest`;
-- package version does not identify the installed Codex version;
-- maintainers own rebuild, cache, compatibility, and regression risk.
-
-The package does not disable Docker cache, attest image contents, or pin Codex automatically.
+The default Dockerfile installs `@openai/codex@latest`. Rebuilds can install a different release, while Docker caching can retain an older one. The package version therefore does not identify the installed Codex version. Sandcastle does not disable Docker cache, attest image contents, or pin Codex automatically.
 
 ## State and security
 
-Workflow-owned state remains beneath the consumer's `.sandcastle` directory:
+Workflow-owned state remains under `.sandcastle`: logs, issue worktrees, dependency overlays, merger recovery state, and the active-run lock. Normal runs enforce owner-only permissions on those directories (`0700`) and on new log, lock, and recovery files (`0600`). These permissions protect against other local users, not agents that receive the project-root mount.
 
-- logs
-- issue worktrees
-- dependency overlays
-- merger recovery state
-- active-run ownership lock
-
-Normal runs enforce owner-only permissions on `.sandcastle`, its worktree, overlay, and log directories (`0700`), and on new log, lock, and merger-recovery files (`0600`). The owner is the host user running Sandcastle. The default container agent uses the same numeric user ID, so these permissions protect against other local users, not against agents that receive the project-root mount.
-
-Treat workflow logs as sensitive. They contain complete agent messages, exact agent commands, execution metadata, and formatted failures. They can also contain source or issue content, local paths, and any credential an agent prints. Sandcastle does not intentionally include `GH_TOKEN` in runner-generated diagnostics, but it does not redact arbitrary agent output or dependency errors. Codex session files under the host user's `.codex` directory may contain resolved prompts, project guidance, and review diffs. Define access, backup, retention, and deletion practices accordingly.
-
-Merger recovery state contains branch names, the issue-derived reviewed branch, and an absolute host worktree path. It does not intentionally contain credentials or source content.
+Logs and Codex sessions may contain agent messages, commands, source or issue content, local paths, and any credential an agent prints. Sandcastle does not intentionally include `GH_TOKEN` in its diagnostics, but it does not redact arbitrary agent output or dependency errors. Define access, backup, retention, and deletion practices accordingly. Recovery state contains branch names and an absolute host worktree path, not credentials or source content.
 
 ### Log retention and cleanup
 
-Sandcastle does not delete workflow logs automatically. Logs remain under `.sandcastle/logs` until the Consumer Repository owner removes them. This preserves audit evidence after successful, stopped, aborted, and interrupted runs.
-
-Before deleting logs, confirm that no workflow is active and that retained logs are no longer needed for merger recovery, incident review, or debugging:
+Sandcastle retains logs until the Consumer Repository owner removes them. Before cleanup, confirm that no run is active and review the files:
 
 ```bash
 test ! -e .sandcastle/run.lock
 find .sandcastle/logs -type f -name 'sandcastle-*.log' -print
 ```
 
-After reviewing the printed paths, remove only Sandcastle log files:
+Then remove only Sandcastle logs:
 
 ```bash
 find .sandcastle/logs -type f -name 'sandcastle-*.log' -exec rm -- {} +
 ```
 
-This cleanup does not remove worktrees, overlays, locks, recovery markers, configuration, credentials, or project files. Sandcastle does not manage the host user's `~/.codex/sessions` retention because that directory is shared with Codex activity outside this workflow. Apply the host's Codex retention and backup policy separately.
+This does not remove worktrees, overlays, locks, recovery markers, configuration, or credentials. Manage `~/.codex/sessions` separately because it is shared with Codex activity outside this workflow.
 
-The installed package is treated as read-only. This guarantee does not restrict agent activity. Agent containers intentionally receive writable worktrees, network access, and `GH_TOKEN`; agents can create commits and branches and mutate GitHub issues within the workflow. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes.
-
-Merger verification keeps host and container paths separate. Host Git, recovery, and cleanup use absolute host paths. Prompts and dependency mounts use `/home/agent/workspace/...` paths.
+The installed package is read-only, but agent containers receive writable worktrees, network access, and `GH_TOKEN`. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes. Host Git, recovery, and cleanup use absolute host paths; prompts and dependency mounts use `/home/agent/workspace/...` paths.
 
 ## Upgrade
 
-Replace the committed tarball and update the consumer lockfile together. Run help, version, initialization, image building, and dry run before a normal workflow. A package upgrade can change packaged prompt rules; review project guidance for conflicts or obsolete instructions before running agents. Derived Docker image names include package version, so a new release requires an explicit image build unless `DOCKER_IMAGE` is configured.
+Copy the replacement artifact into `vendor/` and verify its checksum. Set `VERSION` to the new version, install the new file dependency, and then remove the old artifact. Qualify the upgrade before a normal run:
+
+```bash
+VERSION=x.y.z
+pnpm add -D "./vendor/vvatikiotis-sandcastle-workflow-${VERSION}.tgz"
+pnpm sandcastle --help
+pnpm sandcastle --version
+pnpm sandcastle:setup
+pnpm sandcastle build-image
+pnpm sandcastle:dry-run
+```
+
+Commit the artifact, `package.json`, and lockfile together. Review project guidance for conflicts because an upgrade can change packaged prompts. A new package version changes the derived Docker image name, so build the new image unless `DOCKER_IMAGE` is configured.
