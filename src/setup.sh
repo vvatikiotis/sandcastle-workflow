@@ -84,4 +84,10 @@ fi
 
 printf '%s\n' '' 'Setup complete.'
 printf '%s\n' 'Review .sandcastle/sandcastle.env and .sandcastle/.env, then run:'
-printf '%s\n' '  sandcastle-workflow build-image' '  sandcastle-workflow --dry-run'
+if [ -f pnpm-lock.yaml ]; then
+  printf '%s\n' '  pnpm sandcastle build-image' '  pnpm sandcastle:dry-run'
+elif [ -f package-lock.json ]; then
+  printf '%s\n' '  npm run sandcastle -- build-image' '  npm run sandcastle:dry-run'
+else
+  printf '%s\n' '  Use the Sandcastle project scripts documented in CONSUMER.md.'
+fi

@@ -24,7 +24,7 @@ import { after, before, describe, it } from "node:test";
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageName = "@vvatikiotis/sandcastle-workflow";
-const packageVersion = "0.2.1";
+const packageVersion = "0.2.2";
 const validRunnerConfig = [
   "IMPLEMENTER_MODEL=test-model",
   "IMPLEMENTER_EFFORT=low",
@@ -465,7 +465,7 @@ describe("packed CLI", () => {
     );
     await chmod(path.join(shadowBin, "sandcastle-workflow"), 0o755);
 
-    await run(
+    const result = await run(
       "sh",
       ["-c", "printf 'y\\ny\\n' | \"$1\"", "setup", setup],
       {
@@ -478,8 +478,32 @@ describe("packed CLI", () => {
     );
 
     await assert.rejects(access(shadowMarker));
+    assert.match(result.stdout, /pnpm sandcastle build-image/);
+    assert.match(result.stdout, /pnpm sandcastle:dry-run/);
+    assert.doesNotMatch(result.stdout, /^  sandcastle-workflow /m);
     await access(path.join(consumerRoot, ".sandcastle", "sandcastle.env"));
     await access(path.join(consumerRoot, ".sandcastle", ".env"));
+  });
+
+  it("prints npm project commands after guided setup", async () => {
+    const consumerRoot = await installConsumer("npm-setup");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const setup = path.join(
+      consumerRoot,
+      "node_modules",
+      ".bin",
+      "sandcastle-workflow-setup"
+    );
+
+    const result = await run(
+      "sh",
+      ["-c", "printf 'n\\nn\\n' | \"$1\"", "setup", setup],
+      { cwd: consumerRoot }
+    );
+
+    assert.match(result.stdout, /npm run sandcastle -- build-image/);
+    assert.match(result.stdout, /npm run sandcastle:dry-run/);
+    assert.doesNotMatch(result.stdout, /^  sandcastle-workflow /m);
   });
 
   it("does not leave partial configuration when input ends", async () => {
@@ -566,7 +590,7 @@ describe("packed CLI", () => {
       },
     });
 
-    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.2\.1/);
+    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.2\.2/);
     assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
     assert.match(
       result.stdout,
@@ -575,7 +599,7 @@ describe("packed CLI", () => {
     const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
     const fileIndex = dockerArguments.indexOf("--file");
     const tagIndex = dockerArguments.indexOf("--tag");
-    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.2.1");
+    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.2.2");
     assert.match(dockerArguments[fileIndex + 1], /dist\/defaults\/docker\/Dockerfile$/);
     assert.equal(
       dockerArguments.at(-1),

@@ -101,14 +101,14 @@ pnpm run pack:artifact
 The resulting filename is versioned, for example:
 
 ```text
-artifacts/vvatikiotis-sandcastle-workflow-0.2.1.tgz
+artifacts/vvatikiotis-sandcastle-workflow-0.2.2.tgz
 ```
 
 Inspect the contents and record its checksum:
 
 ```bash
-tar -tzf artifacts/vvatikiotis-sandcastle-workflow-0.2.1.tgz
-sha256sum artifacts/vvatikiotis-sandcastle-workflow-0.2.1.tgz
+tar -tzf artifacts/vvatikiotis-sandcastle-workflow-0.2.2.tgz
+sha256sum artifacts/vvatikiotis-sandcastle-workflow-0.2.2.tgz
 ```
 
 Confirm that the tarball excludes source, tests, development configuration, credentials, active consumer configuration, logs, worktrees, overlays, active-run locks, recovery state, and unrelated repository files.
@@ -125,7 +125,7 @@ Confirm that the tarball excludes source, tests, development configuration, cred
 8. Inspect the tarball contents.
 9. Calculate and record the SHA-256 checksum.
 10. Commit source, tests, documentation, generated `dist/`, and the artifact together.
-11. Create a matching Git tag, such as `v0.2.1`.
+11. Create a matching Git tag, such as `v0.2.2`.
 12. Tell consumers to replace the vendored tarball and update their lockfile.
 
 Example release commands:
@@ -133,8 +133,8 @@ Example release commands:
 ```bash
 git diff --check
 git add package.json CONSUMER.md MAINTAINER.md src test dist artifacts
-git commit -m "release: package v0.2.1"
-git tag v0.2.1
+git commit -m "release: package v0.2.2"
+git tag v0.2.2
 ```
 
 Do not publish to npm or another registry unless the project specification explicitly changes.
@@ -144,7 +144,7 @@ Do not publish to npm or another registry unless the project specification expli
 A consumer updates by replacing its vendored artifact and lockfile entry:
 
 ```bash
-pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.2.1.tgz
+pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.2.2.tgz
 ```
 
 Consumers must run help, version, initialization, image building, and dry run before a normal workflow. A new package version can make project prompt guidance obsolete or conflicting and changes derived Docker image names. The consumer must build the new image explicitly unless it uses `DOCKER_IMAGE`.
