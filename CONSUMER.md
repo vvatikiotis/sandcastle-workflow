@@ -2,7 +2,9 @@
 
 This guide describes using the private Sandcastle checkout from another repository owned by the same person. The workflow is not distributed to collaborators, through a registry, or through committed artifacts.
 
-## Setup and run
+## Owner-local setup and run
+
+Use this setup for each consumer checkout. The consumer must not add the private workflow as a package dependency, commit its checkout path, or contain its source, compiled output, or tarballs.
 
 From the private package checkout, build the executable:
 
