@@ -31,7 +31,7 @@ function formatSummary(status: RunEndStatus): string {
   const divider = "=".repeat(72);
   const successful = status.kind === "completed" ? "yes" : "no";
 
-  return `\n${chalk.cyan(divider)}\n${chalk.cyan("SANDCASTLE RUN:")} ${color(status.kind.toUpperCase())}\n${chalk.cyan("Successful:")} ${color(successful)}\n${chalk.cyan("Reason:")} ${status.reason}\n${chalk.cyan(divider)}\n`;
+  return `\n${chalk.blue(divider)}\n${chalk.blue("SANDCASTLE RUN:")} ${color(status.kind.toUpperCase())}\n${chalk.blue("Successful:")} ${color(successful)}\n${chalk.blue("Reason:")} ${status.reason}\n${chalk.blue(divider)}\n`;
 }
 
 function writeAndFlush(

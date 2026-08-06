@@ -95,13 +95,7 @@ import { resolveDockerfile, resolveDockerImageName } from "./docker-image.ts";
 import { resolvePackageManager } from "./package-manager.ts";
 import { acquireRunLock, type RunLock } from "./run-lock.ts";
 
-type CliMode =
-  | "run"
-  | "init"
-  | "build-image"
-  | "dry-run"
-  | "help"
-  | "version";
+type CliMode = "run" | "init" | "build-image" | "dry-run" | "help" | "version";
 
 const usage = `Usage: sandcastle-workflow [command]
 
@@ -143,7 +137,7 @@ function parseCliMode(args: readonly string[]): CliMode | undefined {
 async function readPackageVersion(): Promise<string> {
   const manifestText = await readFile(
     new URL("../package.json", import.meta.url),
-    "utf8"
+    "utf8",
   );
   const manifest: unknown = JSON.parse(manifestText);
   if (
@@ -160,9 +154,7 @@ async function readPackageVersion(): Promise<string> {
 
 const command = parseCliMode(process.argv.slice(2));
 if (command === undefined) {
-  process.stderr.write(
-    `Unknown command or invalid arguments.\n\n${usage}\n`
-  );
+  process.stderr.write(`Unknown command or invalid arguments.\n\n${usage}\n`);
   process.exit(2);
 }
 
@@ -176,6 +168,8 @@ if (command === "version") {
   console.log(packageVersion);
   process.exit(0);
 }
+
+console.log(`Sandcastle Workflow v${packageVersion}\n`);
 
 //
 // region Run completion reporting
@@ -211,7 +205,7 @@ async function discoverProjectRoot(): Promise<string> {
     const { stdout } = await rawExecFile(
       "git",
       ["rev-parse", "--show-toplevel"],
-      { cwd: process.cwd(), encoding: "utf8" }
+      { cwd: process.cwd(), encoding: "utf8" },
     );
     const root = stdout.trim();
     if (root !== "") {
@@ -220,12 +214,12 @@ async function discoverProjectRoot(): Promise<string> {
   } catch (error) {
     throw new Error(
       `Sandcastle must be run inside a Git worktree. Git could not discover the repository root from ${process.cwd()}.`,
-      { cause: error }
+      { cause: error },
     );
   }
 
   throw new Error(
-    `Sandcastle must be run inside a Git worktree. Git returned an empty repository root for ${process.cwd()}.`
+    `Sandcastle must be run inside a Git worktree. Git returned an empty repository root for ${process.cwd()}.`,
   );
 }
 
@@ -243,8 +237,8 @@ if (command === "init") {
       "@vvatikiotis",
       "sandcastle-workflow",
       "skills",
-      "github-ticket-relationships"
-    )
+      "github-ticket-relationships",
+    ),
   );
   runCompletion.setStatus({
     kind: "completed",
@@ -268,14 +262,17 @@ async function requireProjectSandcastleDirectory(): Promise<void> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return;
     }
-    throw new Error(`Could not inspect Sandcastle directory ${sandcastleRoot}.`, {
-      cause: error,
-    });
+    throw new Error(
+      `Could not inspect Sandcastle directory ${sandcastleRoot}.`,
+      {
+        cause: error,
+      },
+    );
   }
 
   if (metadata.isSymbolicLink()) {
     throw new Error(
-      `Refusing to run through symbolic Sandcastle directory ${sandcastleRoot}.`
+      `Refusing to run through symbolic Sandcastle directory ${sandcastleRoot}.`,
     );
   }
   if (!metadata.isDirectory()) {
@@ -333,7 +330,7 @@ type RunnerConfig = Record<RunnerConfigKey, string> &
 function parseConfigValue(
   value: string,
   lineNumber: number,
-  configPath: string
+  configPath: string,
 ): string {
   const firstCharacter = value[0];
 
@@ -369,7 +366,7 @@ async function loadRunnerConfig(): Promise<RunnerConfig> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
-        `${runnerConfigPath} is required. Run "sandcastle-workflow init", then copy .sandcastle/sandcastle.env.example to .sandcastle/sandcastle.env and choose every runner value.`
+        `${runnerConfigPath} is required. Run "sandcastle-workflow init", then copy .sandcastle/sandcastle.env.example to .sandcastle/sandcastle.env and choose every runner value.`,
       );
     }
     throw error;
@@ -392,21 +389,21 @@ async function loadRunnerConfig(): Promise<RunnerConfig> {
     const separatorIndex = trimmedLine.indexOf("=");
     if (separatorIndex <= 0) {
       throw new Error(
-        `${runnerConfigPath}:${lineNumber}: expected a KEY=value assignment.`
+        `${runnerConfigPath}:${lineNumber}: expected a KEY=value assignment.`,
       );
     }
 
     const key = trimmedLine.slice(0, separatorIndex).trim();
     if (!allowedKeys.has(key)) {
       throw new Error(
-        `${runnerConfigPath}:${lineNumber}: unknown configuration key ${key}.`
+        `${runnerConfigPath}:${lineNumber}: unknown configuration key ${key}.`,
       );
     }
 
     const runnerConfigKey = key as RunnerConfigKey | OptionalRunnerConfigKey;
     if (values.has(runnerConfigKey)) {
       throw new Error(
-        `${runnerConfigPath}:${lineNumber}: duplicate configuration key ${key}.`
+        `${runnerConfigPath}:${lineNumber}: duplicate configuration key ${key}.`,
       );
     }
 
@@ -414,7 +411,7 @@ async function loadRunnerConfig(): Promise<RunnerConfig> {
     const value = parseConfigValue(rawValue, lineNumber, runnerConfigPath);
     if (value === "") {
       throw new Error(
-        `${runnerConfigPath}:${lineNumber}: ${key} must not be empty.`
+        `${runnerConfigPath}:${lineNumber}: ${key} must not be empty.`,
       );
     }
 
@@ -424,7 +421,7 @@ async function loadRunnerConfig(): Promise<RunnerConfig> {
   const missingKeys = runnerConfigKeys.filter((key) => !values.has(key));
   if (missingKeys.length > 0) {
     throw new Error(
-      `${runnerConfigPath} is missing required configuration: ${missingKeys.join(", ")}.`
+      `${runnerConfigPath} is missing required configuration: ${missingKeys.join(", ")}.`,
     );
   }
 
@@ -444,7 +441,7 @@ const runnerConfig = await loadRunnerConfig();
 const dockerImageName = resolveDockerImageName(
   runnerConfig.DOCKER_IMAGE,
   projectRoot,
-  packageVersion
+  packageVersion,
 );
 const dockerfile = await resolveDockerfile({ projectRoot, workflowRoot });
 
@@ -509,11 +506,11 @@ async function validateGitHubRepository(): Promise<void> {
   const remoteUrl = remoteUrlOutput.trim();
   if (
     !/^(?:https:\/\/github\.com\/|git@github\.com:)[^/]+\/[^/]+(?:\.git)?$/.test(
-      remoteUrl
+      remoteUrl,
     )
   ) {
     throw new Error(
-      `Sandcastle version 0.2.2 supports only GitHub.com origin remotes. Found: ${remoteUrl || "none"}.`
+      `Sandcastle version 0.3.0 supports only GitHub.com origin remotes. Found: ${remoteUrl || "none"}.`,
     );
   }
 
@@ -537,11 +534,11 @@ async function validateGitHubRepository(): Promise<void> {
     "wontfix",
   ];
   const missingLabels = requiredLabels.filter(
-    (label) => !availableLabels.has(label)
+    (label) => !availableLabels.has(label),
   );
   if (missingLabels.length > 0) {
     throw new Error(
-      `The GitHub repository is missing required triage labels: ${missingLabels.join(", ")}.`
+      `The GitHub repository is missing required triage labels: ${missingLabels.join(", ")}.`,
     );
   }
 }
@@ -563,7 +560,7 @@ if (
   maxIterations < 1
 ) {
   throw new Error(
-    `${runnerConfigPath}: MAX_ITERATIONS must be a positive integer.`
+    `${runnerConfigPath}: MAX_ITERATIONS must be a positive integer.`,
   );
 }
 
@@ -592,7 +589,9 @@ const promptFiles = await resolvePromptFiles({ projectRoot, workflowRoot });
 for (const selection of promptFiles.selections) {
   console.log(`Prompt ${selection.filename}: built-in ${selection.path}`);
   if (selection.guidancePath !== undefined) {
-    console.log(`Project guidance ${selection.filename}: ${selection.guidancePath}`);
+    console.log(
+      `Project guidance ${selection.filename}: ${selection.guidancePath}`,
+    );
   }
 }
 
@@ -606,7 +605,7 @@ async function loadAgentEnvironment(): Promise<Record<string, string>> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
-        `${agentEnvironmentPath} is required before launching agents. Copy .sandcastle/.env.example to .sandcastle/.env and set GH_TOKEN, or leave GH_TOKEN empty to use the documented host-environment fallback.`
+        `${agentEnvironmentPath} is required before launching agents. Copy .sandcastle/.env.example to .sandcastle/.env and set GH_TOKEN, or leave GH_TOKEN empty to use the documented host-environment fallback.`,
       );
     }
     throw error;
@@ -624,17 +623,17 @@ async function loadAgentEnvironment(): Promise<Record<string, string>> {
     const key = trimmedLine.slice(0, separatorIndex).trim();
     if (separatorIndex <= 0 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
       throw new Error(
-        `${agentEnvironmentPath}:${lineNumber}: expected a KEY=value assignment.`
+        `${agentEnvironmentPath}:${lineNumber}: expected a KEY=value assignment.`,
       );
     }
     if (key !== "GH_TOKEN") {
       throw new Error(
-        `${agentEnvironmentPath}:${lineNumber}: unsupported agent environment key ${key}. Only GH_TOKEN is supported; remove ${key} before running Sandcastle.`
+        `${agentEnvironmentPath}:${lineNumber}: unsupported agent environment key ${key}. Only GH_TOKEN is supported; remove ${key} before running Sandcastle.`,
       );
     }
     if (values.has(key)) {
       throw new Error(
-        `${agentEnvironmentPath}:${lineNumber}: duplicate environment key ${key}.`
+        `${agentEnvironmentPath}:${lineNumber}: duplicate environment key ${key}.`,
       );
     }
 
@@ -643,14 +642,14 @@ async function loadAgentEnvironment(): Promise<Record<string, string>> {
       parseConfigValue(
         trimmedLine.slice(separatorIndex + 1).trim(),
         lineNumber,
-        agentEnvironmentPath
-      )
+        agentEnvironmentPath,
+      ),
     );
   }
 
   if (!values.has("GH_TOKEN")) {
     throw new Error(
-      `${agentEnvironmentPath} must declare GH_TOKEN. Copy the declaration from .sandcastle/.env.example.`
+      `${agentEnvironmentPath} must declare GH_TOKEN. Copy the declaration from .sandcastle/.env.example.`,
     );
   }
 
@@ -664,7 +663,7 @@ async function loadAgentEnvironment(): Promise<Record<string, string>> {
   }
   if (ghToken === undefined) {
     throw new Error(
-      `${agentEnvironmentPath} declares GH_TOKEN, but no usable credential was provided in the file or host environment.`
+      `${agentEnvironmentPath} declares GH_TOKEN, but no usable credential was provided in the file or host environment.`,
     );
   }
   values.set("GH_TOKEN", ghToken);
@@ -683,7 +682,7 @@ const agentEnvironment = isDryRun ? {} : await loadAgentEnvironment();
 //
 
 async function isEffectivelyIgnored(
-  projectRelativePath: string
+  projectRelativePath: string,
 ): Promise<boolean> {
   try {
     await execFile("git", [
@@ -705,7 +704,7 @@ async function isEffectivelyIgnored(
     }
     throw new Error(
       `Could not check effective Git ignore behavior for ${projectRelativePath}.`,
-      { cause: error }
+      { cause: error },
     );
   }
 }
@@ -731,14 +730,14 @@ async function validateEffectiveIgnoreBehavior(): Promise<void> {
     .filter(Boolean);
   if (trackedProtectedPaths.length > 0) {
     throw new Error(
-      `Git ignore rules cannot protect tracked Sandcastle paths: ${trackedProtectedPaths.join(", ")}. Remove them from the Git index without deleting the local files before launching agents.`
+      `Git ignore rules cannot protect tracked Sandcastle paths: ${trackedProtectedPaths.join(", ")}. Remove them from the Git index without deleting the local files before launching agents.`,
     );
   }
 
   for (const protectedPath of protectedPaths) {
     if (!(await isEffectivelyIgnored(protectedPath))) {
       throw new Error(
-        `Git ignore protection is required for ${protectedPath}. Add an effective ignore rule before launching agents.`
+        `Git ignore protection is required for ${protectedPath}. Add an effective ignore rule before launching agents.`,
       );
     }
   }
@@ -759,7 +758,7 @@ async function validateEffectiveIgnoreBehavior(): Promise<void> {
   for (const trackablePath of trackablePaths) {
     if (await isEffectivelyIgnored(trackablePath)) {
       throw new Error(
-        `Workflow file ${trackablePath} must remain trackable. Remove the effective ignore rule that hides it.`
+        `Workflow file ${trackablePath} must remain trackable. Remove the effective ignore rule that hides it.`,
       );
     }
   }
@@ -823,7 +822,7 @@ const mounts = [
 ];
 const nodeModulesOverlayRoot = projectPath(
   ".sandcastle",
-  "node-modules-overlays"
+  "node-modules-overlays",
 );
 
 function getSandboxMounts(overlay: NodeModulesOverlay) {
@@ -832,20 +831,21 @@ function getSandboxMounts(overlay: NodeModulesOverlay) {
 
 async function withSandboxNodeModulesOverlay<T>(
   sandboxPath: string,
-  operation: (overlay: NodeModulesOverlay) => Promise<T>
+  operation: (overlay: NodeModulesOverlay) => Promise<T>,
 ): Promise<T> {
   return withNodeModulesOverlay(
     { rootDirectory: nodeModulesOverlayRoot, sandboxPath },
-    operation
+    operation,
   );
 }
 
 type SandboxLifecycleResult<T> =
-  { kind: "success"; value: T } | { kind: "failure"; error: unknown };
+  | { kind: "success"; value: T }
+  | { kind: "failure"; error: unknown };
 
 async function closeSandboxWithNodeModulesOverlay<T>(
   sandbox: { close: () => Promise<T> },
-  overlay: NodeModulesOverlay
+  overlay: NodeModulesOverlay,
 ): Promise<T> {
   let closeResult: SandboxLifecycleResult<T>;
 
@@ -866,7 +866,7 @@ async function closeSandboxWithNodeModulesOverlay<T>(
   if (closeResult.kind === "failure" && cleanupResult.kind === "failure") {
     throw new AggregateError(
       [closeResult.error, cleanupResult.error],
-      "Sandbox closure and node_modules overlay cleanup both failed."
+      "Sandbox closure and node_modules overlay cleanup both failed.",
     );
   }
   if (closeResult.kind === "failure") {
@@ -898,7 +898,7 @@ async function requireDockerImage(): Promise<void> {
   } catch (error) {
     throw new Error(
       `Docker image '${dockerImageName}' is not available. Build it explicitly with "sandcastle-workflow build-image", then rerun the workflow.`,
-      { cause: error }
+      { cause: error },
     );
   }
 
@@ -934,9 +934,9 @@ function createConfiguredAgent(config: {
 function createRunName(
   agentType: string,
   modelName: string,
-  reasoningLevel: string
+  reasoningLevel: string,
 ): string {
-  return chalk.cyan(`${agentType}: ${modelName}, ${reasoningLevel}`);
+  return chalk.blue(`${agentType}: ${modelName}, ${reasoningLevel}`);
 }
 
 function announceAgentStart(runName: string, branch: string): void {
@@ -949,7 +949,7 @@ function formatTimestamp(date = new Date()): string {
 
   return (
     [date.getFullYear(), pad2(date.getMonth() + 1), pad2(date.getDate())].join(
-      ""
+      "",
     ) +
     `-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}-${pad3(date.getMilliseconds())}`
   );
@@ -960,7 +960,7 @@ async function requirePrivateDirectory(directoryPath: string): Promise<void> {
   const metadata = await lstat(directoryPath);
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new Error(
-      `Sandcastle private state path ${directoryPath} must be a real directory.`
+      `Sandcastle private state path ${directoryPath} must be a real directory.`,
     );
   }
   await chmod(directoryPath, 0o700);
@@ -968,13 +968,13 @@ async function requirePrivateDirectory(directoryPath: string): Promise<void> {
 
 async function createLogPath(
   scope: string,
-  agentType: string
+  agentType: string,
 ): Promise<string> {
   const logDirectory = projectPath(".sandcastle", "logs");
   await requirePrivateDirectory(logDirectory);
   const logPath = path.join(
     logDirectory,
-    `sandcastle-${scope}-${agentType}-${formatTimestamp()}-${process.pid}.log`
+    `sandcastle-${scope}-${agentType}-${formatTimestamp()}-${process.pid}.log`,
   );
   const handle = await open(logPath, "wx", 0o600);
   await handle.close();
@@ -1007,7 +1007,7 @@ async function hasSafeWorkingTree(): Promise<boolean> {
 
   if (untrackedEntries.length > 0) {
     console.warn(
-      `WARNING: ${untrackedEntries.length} untracked file(s) are present. Continuing.`
+      `WARNING: ${untrackedEntries.length} untracked file(s) are present. Continuing.`,
     );
   }
 
@@ -1016,13 +1016,13 @@ async function hasSafeWorkingTree(): Promise<boolean> {
   }
 
   console.warn(
-    `WARNING: ${trackedEntries.length} tracked working-tree change(s) are present. Aborting before planning.`
+    `WARNING: ${trackedEntries.length} tracked working-tree change(s) are present. Aborting before planning.`,
   );
   return false;
 }
 
 async function isRebaseInProgress(
-  worktreePath = projectRoot
+  worktreePath = projectRoot,
 ): Promise<boolean> {
   const rebaseDirectories = await Promise.all(
     ["rebase-merge", "rebase-apply"].map(async (directory) => {
@@ -1034,7 +1034,7 @@ async function isRebaseInProgress(
         directory,
       ]);
       return stdout.trim();
-    })
+    }),
   );
 
   return rebaseDirectories.some((directory) => existsSync(directory));
@@ -1054,7 +1054,7 @@ async function abortRebase(worktreePath: string): Promise<boolean> {
     return true;
   } catch (error) {
     console.warn(
-      `WARNING: Could not abort the active rebase in ${worktreePath}. Preserving it for manual recovery. ${formatDiagnostic(error)}`
+      `WARNING: Could not abort the active rebase in ${worktreePath}. Preserving it for manual recovery. ${formatDiagnostic(error)}`,
     );
     return false;
   }
@@ -1073,7 +1073,7 @@ async function recoverBaseCheckout(baseBranch: string): Promise<boolean> {
 
   if (trackedEntries.length > 0) {
     console.warn(
-      `WARNING: Merger recovery found ${trackedEntries.length} tracked working-tree change(s). Preserving the checkout for manual recovery.`
+      `WARNING: Merger recovery found ${trackedEntries.length} tracked working-tree change(s). Preserving the checkout for manual recovery.`,
     );
     return false;
   }
@@ -1083,7 +1083,7 @@ async function recoverBaseCheckout(baseBranch: string): Promise<boolean> {
     return true;
   } catch (error) {
     console.warn(
-      `WARNING: Merger recovery could not switch back to base branch ${baseBranch}. Preserving the checkout for manual recovery. ${formatDiagnostic(error)}`
+      `WARNING: Merger recovery could not switch back to base branch ${baseBranch}. Preserving the checkout for manual recovery. ${formatDiagnostic(error)}`,
     );
     return false;
   }
@@ -1131,7 +1131,7 @@ async function getBranchHeadCommitSubject(branch: string): Promise<string> {
 }
 
 async function removeVerificationWorktree(
-  verificationWorktreePath: string
+  verificationWorktreePath: string,
 ): Promise<boolean> {
   const result = await cleanupVerificationWorktree({
     repositoryPath: projectRoot,
@@ -1142,7 +1142,7 @@ async function removeVerificationWorktree(
   }
 
   console.warn(
-    `WARNING: Could not remove merger verification worktree. ${result.detail} Recovery marker: ${mergerRecoveryPath}. See .sandcastle/README.md for inspected manual recovery steps.`
+    `WARNING: Could not remove merger verification worktree. ${result.detail} Recovery marker: ${mergerRecoveryPath}. See .sandcastle/README.md for inspected manual recovery steps.`,
   );
   return false;
 }
@@ -1152,12 +1152,14 @@ async function clearMergerRecoveryMarker(): Promise<void> {
 }
 
 async function resolveRegisteredRecoveryWorktree(
-  verificationWorktreePath: string
+  verificationWorktreePath: string,
 ): Promise<string | undefined> {
   const worktreeRoot = projectPath(".sandcastle", "worktrees");
   const resolvedRoot = await realpath(worktreeRoot);
   if (resolvedRoot !== path.resolve(worktreeRoot)) {
-    throw new Error(`Workflow worktree directory is redirected: ${worktreeRoot}.`);
+    throw new Error(
+      `Workflow worktree directory is redirected: ${worktreeRoot}.`,
+    );
   }
 
   const requestedPath = path.resolve(verificationWorktreePath);
@@ -1166,7 +1168,7 @@ async function resolveRegisteredRecoveryWorktree(
     !/^sandcastle-merger-verify-issue-\d+$/.test(path.basename(requestedPath))
   ) {
     throw new Error(
-      `Recovery worktree is not an expected verification path: ${requestedPath}.`
+      `Recovery worktree is not an expected verification path: ${requestedPath}.`,
     );
   }
 
@@ -1181,7 +1183,7 @@ async function resolveRegisteredRecoveryWorktree(
   }
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new Error(
-      `Recovery worktree must be a real directory: ${requestedPath}.`
+      `Recovery worktree must be a real directory: ${requestedPath}.`,
     );
   }
   const resolvedPath = await realpath(requestedPath);
@@ -1204,7 +1206,7 @@ async function resolveRegisteredRecoveryWorktree(
     .includes(resolvedPath);
   if (!registered) {
     throw new Error(
-      `Git does not register the recovery worktree: ${resolvedPath}.`
+      `Git does not register the recovery worktree: ${resolvedPath}.`,
     );
   }
 
@@ -1213,7 +1215,7 @@ async function resolveRegisteredRecoveryWorktree(
 
 async function recoverMergerState(
   baseBranch: string,
-  verificationWorktreePath: string
+  verificationWorktreePath: string,
 ): Promise<boolean> {
   try {
     const resolvedVerificationWorktreePath =
@@ -1231,7 +1233,7 @@ async function recoverMergerState(
     return baseCheckoutRecovered && verificationWorktreeRemoved;
   } catch (error) {
     console.warn(
-      `WARNING: Could not recover merger state for ${verificationWorktreePath}. Preserving it and ${mergerRecoveryPath} for manual recovery. ${formatDiagnostic(error)}`
+      `WARNING: Could not recover merger state for ${verificationWorktreePath}. Preserving it and ${mergerRecoveryPath} for manual recovery. ${formatDiagnostic(error)}`,
     );
     return false;
   }
@@ -1240,11 +1242,11 @@ async function recoverMergerState(
 async function recoverAfterMergerValidationFailure(
   error: unknown,
   baseBranch: string,
-  verificationWorktreePath: string
+  verificationWorktreePath: string,
 ): Promise<never> {
   const recovered = await recoverMergerState(
     baseBranch,
-    verificationWorktreePath
+    verificationWorktreePath,
   );
   if (recovered) {
     try {
@@ -1253,7 +1255,7 @@ async function recoverAfterMergerValidationFailure(
       process.exitCode = 1;
       throw new AggregateError(
         [error, markerError],
-        "Merger validation failed and its recovery marker could not be cleared."
+        "Merger validation failed and its recovery marker could not be cleared.",
       );
     }
     throw error;
@@ -1264,10 +1266,10 @@ async function recoverAfterMergerValidationFailure(
     [
       error,
       new Error(
-        `Merger validation recovery failed. Preserved ${mergerRecoveryPath}.`
+        `Merger validation recovery failed. Preserved ${mergerRecoveryPath}.`,
       ),
     ],
-    "Merger validation and recovery both failed."
+    "Merger validation and recovery both failed.",
   );
 }
 
@@ -1278,20 +1280,20 @@ async function recoverInterruptedMerger(): Promise<boolean> {
 
   try {
     const marker = mergerRecoverySchema.parse(
-      JSON.parse(await readFile(mergerRecoveryPath, "utf8"))
+      JSON.parse(await readFile(mergerRecoveryPath, "utf8")),
     );
     console.warn(
-      `WARNING: Recovering an interrupted merger for base branch ${marker.baseBranch}.`
+      `WARNING: Recovering an interrupted merger for base branch ${marker.baseBranch}.`,
     );
     const recovered = await recoverMergerState(
       marker.baseBranch,
-      marker.verificationWorktreePath
+      marker.verificationWorktreePath,
     );
 
     if (recovered) {
       await clearMergerRecoveryMarker();
       console.warn(
-        `WARNING: Interrupted merger recovery preserved reviewed branch ${marker.reviewedBranch}.`
+        `WARNING: Interrupted merger recovery preserved reviewed branch ${marker.reviewedBranch}.`,
       );
       console.log("Interrupted merger recovery completed.");
     }
@@ -1299,7 +1301,7 @@ async function recoverInterruptedMerger(): Promise<boolean> {
     return recovered;
   } catch (error) {
     console.warn(
-      `WARNING: Interrupted merger recovery failed. Preserving the checkout and ${mergerRecoveryPath} for manual recovery. ${formatDiagnostic(error)}`
+      `WARNING: Interrupted merger recovery failed. Preserving the checkout and ${mergerRecoveryPath} for manual recovery. ${formatDiagnostic(error)}`,
     );
     return false;
   }
@@ -1324,7 +1326,7 @@ async function getBaseSnapshot(): Promise<{
 
   if (!branch || branch === "(detached)" || !commit || commit === "(initial)") {
     throw new Error(
-      "Sandcastle requires a named base branch with an existing HEAD commit."
+      "Sandcastle requires a named base branch with an existing HEAD commit.",
     );
   }
 
@@ -1362,12 +1364,12 @@ async function getOpenReadyIssues(): Promise<ReadyIssue[]> {
         title: z.string(),
         createdAt: z.string().datetime({ offset: true }),
         parentId: z.string().regex(/^\d+$/).nullable(),
-      })
+      }),
     )
     .parse(JSON.parse(stdout));
   if (readyIssues.length > 100) {
     throw new InvalidIssueGraphError(
-      "Sandcastle found more than 100 open ready-for-agent issues. Reduce the eligible set to the documented version 0.2.2 limit before running the workflow."
+      "Sandcastle found more than 100 open ready-for-agent issues. Reduce the eligible set to the documented version 0.3.0 limit before running the workflow.",
     );
   }
   return readyIssues;
@@ -1416,7 +1418,7 @@ async function getNativeSubIssues(specIssueId: string): Promise<SpecChild[]> {
         title: z.string(),
         state: z.enum(["open", "closed"]),
         labels: z.array(z.object({ name: z.string() })),
-      })
+      }),
     )
     .parse(JSON.parse(stdout));
 
@@ -1426,7 +1428,7 @@ async function getNativeSubIssues(specIssueId: string): Promise<SpecChild[]> {
 
       if (details.parentId !== specIssueId) {
         throw new InvalidIssueGraphError(
-          `GitHub listed issue #${issue.number} under spec #${specIssueId}, but its parent is #${details.parentId ?? "none"}.`
+          `GitHub listed issue #${issue.number} under spec #${specIssueId}, but its parent is #${details.parentId ?? "none"}.`,
         );
       }
 
@@ -1440,7 +1442,7 @@ async function getNativeSubIssues(specIssueId: string): Promise<SpecChild[]> {
         blockerIds: details.blockerIds,
         blocksParent: details.blockingIds.includes(specIssueId),
       };
-    })
+    }),
   );
 }
 
@@ -1454,7 +1456,7 @@ async function getWorkCandidates(): Promise<{
   const nativeSubIssuesByIssue = new Map<string, readonly SpecChild[]>();
 
   const getCachedNativeSubIssues = async (
-    issueId: string
+    issueId: string,
   ): Promise<readonly SpecChild[]> => {
     const cached = nativeSubIssuesByIssue.get(issueId);
     if (cached) {
@@ -1484,7 +1486,7 @@ async function getWorkCandidates(): Promise<{
     for (const child of candidate.children) {
       if ((await getCachedNativeSubIssues(child.id)).length > 0) {
         selection.errors.push(
-          `Spec #${candidate.id} has nested sub-issue #${child.id}; nested hierarchies are not supported.`
+          `Spec #${candidate.id} has nested sub-issue #${child.id}; nested hierarchies are not supported.`,
         );
       }
     }
@@ -1495,7 +1497,7 @@ async function getWorkCandidates(): Promise<{
 
 async function getSelectedIssueEligibilityError(
   specIssueId: string,
-  issueId: string
+  issueId: string,
 ): Promise<string | undefined> {
   let workCandidates: Awaited<ReturnType<typeof getWorkCandidates>>;
   try {
@@ -1557,7 +1559,7 @@ async function isIssueClosed(issueId: string): Promise<boolean> {
 async function shouldSkipReviewerAfterRerun(
   branch: string,
   issueId: string,
-  workPath: WorkPath
+  workPath: WorkPath,
 ): Promise<boolean> {
   try {
     const commitSubject = await getBranchHeadCommitSubject(branch);
@@ -1566,7 +1568,7 @@ async function shouldSkipReviewerAfterRerun(
       : shouldJumpToMergerAfterReuseForStandalone(commitSubject, issueId);
   } catch (error) {
     console.warn(
-      `WARNING: Could not inspect the latest commit on ${branch} for rerun routing. ${formatDiagnostic(error)}`
+      `WARNING: Could not inspect the latest commit on ${branch} for rerun routing. ${formatDiagnostic(error)}`,
     );
     return false;
   }
@@ -1575,14 +1577,14 @@ async function shouldSkipReviewerAfterRerun(
 async function writeMergerRecoveryMarker(
   baseBranch: string,
   reviewedBranch: string,
-  verificationWorktreePath: string
+  verificationWorktreePath: string,
 ): Promise<void> {
   const temporaryPath = `${mergerRecoveryPath}.${process.pid}.${randomUUID()}.tmp`;
   let handle;
   try {
     handle = await open(temporaryPath, "wx", 0o600);
     await handle.writeFile(
-      JSON.stringify({ baseBranch, reviewedBranch, verificationWorktreePath })
+      JSON.stringify({ baseBranch, reviewedBranch, verificationWorktreePath }),
     );
     await handle.sync();
     await handle.close();
@@ -1593,7 +1595,7 @@ async function writeMergerRecoveryMarker(
     await unlink(temporaryPath).catch(() => undefined);
     throw new Error(
       `Could not write private merger recovery state ${mergerRecoveryPath}.`,
-      { cause: error }
+      { cause: error },
     );
   }
 }
@@ -1604,7 +1606,7 @@ async function deleteReviewedBranch(branch: string): Promise<void> {
 
 async function createMergerVerificationWorktree(
   verificationWorktreePath: string,
-  branch: string
+  branch: string,
 ): Promise<void> {
   await execFile("git", ["worktree", "add", verificationWorktreePath, branch]);
 }
@@ -1620,18 +1622,18 @@ async function createMergerVerificationWorktree(
 type FinalSpecOutcome = "closed" | "open" | "not-ready" | "stopped";
 
 async function runFinalSpecReview(
-  specIssueId: string
+  specIssueId: string,
 ): Promise<AgentPhaseResult<FinalSpecOutcome> & { logPath: string }> {
   await requireDockerImage();
   const branch = await getCheckedOutBranch();
   const logPath = await createLogPath(
     `spec-${specIssueId}-final-review`,
-    "final-spec-reviewer"
+    "final-spec-reviewer",
   );
   const runName = createRunName(
     "final-spec-reviewer",
     AGENT_CONFIG.finalSpecReviewer.model,
-    AGENT_CONFIG.finalSpecReviewer.effort
+    AGENT_CONFIG.finalSpecReviewer.effort,
   );
   announceAgentStart(runName, branch);
 
@@ -1660,7 +1662,7 @@ async function runFinalSpecReview(
             SPEC_ISSUE_ID: specIssueId,
           },
           logging: { type: "file", path: logPath },
-        })
+        }),
       ),
   });
 
@@ -1687,7 +1689,7 @@ async function chooseWorkPath(): Promise<WorkPath> {
     while (true) {
       const answer = (
         await readline.question(
-          "Ready spec work and standalone issues are available. Follow the spec path or the standalone/orphan path? [spec/orphan] "
+          "Ready spec work and standalone issues are available. Follow the spec path or the standalone/orphan path? [spec/orphan] ",
         )
       )
         .trim()
@@ -1711,16 +1713,16 @@ function printDryRun(
   specCandidates: readonly SpecCandidate[],
   standaloneIssues: readonly ReadyIssue[],
   errors: readonly string[],
-  workPath?: WorkPath
+  workPath?: WorkPath,
 ): void {
   console.log("\n=== Sandcastle dry run ===");
   console.log(
-    "Dry run only. No agents will be started and no changes will be made."
+    "Dry run only. No agents will be started and no changes will be made.",
   );
 
   if (errors.length > 0) {
     console.log(
-      `Would abort:\n${errors.map((error) => `- ${error}`).join("\n")}`
+      chalk.red(`Would abort:\n${errors.map((error) => `- ${error}`).join("\n")}`),
     );
     return;
   }
@@ -1732,10 +1734,10 @@ function printDryRun(
     }
 
     console.log(
-      `Standalone issues: ${standaloneIssues.map((issue) => `#${issue.id} ${issue.title}`).join(", ")}.`
+      `Standalone issues: ${standaloneIssues.map((issue) => `#${issue.id} ${issue.title}`).join(", ")}.`,
     );
     console.log(
-      `Would implement standalone issue #${standaloneIssues[0].id} next.`
+      `Would implement standalone issue #${standaloneIssues[0].id} next.`,
     );
     return;
   }
@@ -1744,7 +1746,7 @@ function printDryRun(
 
   for (const candidate of specCandidates) {
     console.log(
-      `\nSpec #${candidate.id}: ${candidate.title} (${candidate.createdAt})`
+      `\nSpec #${candidate.id}: ${candidate.title} (${candidate.createdAt})`,
     );
 
     for (const child of candidate.children) {
@@ -1754,7 +1756,7 @@ function printDryRun(
 
   if (workPath === "standalone") {
     console.log(
-      `\nSelected standalone/orphan path. Would implement standalone issue #${standaloneIssues[0].id} next.`
+      `\nSelected standalone/orphan path. Would implement standalone issue #${standaloneIssues[0].id} next.`,
     );
     return;
   }
@@ -1763,23 +1765,25 @@ function printDryRun(
   const readyChildren = getEligibleChildren(selectedSpec.children);
   const blockedReadyChildren = getBlockedReadyChildren(selectedSpec.children);
   const unresolvedChildren = selectedSpec.children.filter(
-    (child) => child.status !== "closed" && child.status !== "ready-for-agent"
+    (child) => child.status !== "closed" && child.status !== "ready-for-agent",
   );
 
   console.log(
-    `\nSelected earliest spec: #${selectedSpec.id} ${selectedSpec.title}.`
+    `\nSelected earliest spec: #${selectedSpec.id} ${selectedSpec.title}.`,
   );
   console.log(
-    `Ordered ready-for-agent children: ${readyChildren.length === 0 ? "none" : readyChildren.map((child) => `#${child.id} ${child.title}`).join(", ")}.`
+    `Ordered ready-for-agent children: ${readyChildren.length === 0 ? "none" : readyChildren.map((child) => `#${child.id} ${child.title}`).join(", ")}.`,
   );
 
   if (unresolvedChildren.length > 0) {
-    console.log("Would warn about unresolved children and stop.");
+    console.log(chalk.yellow("Would warn about unresolved children and stop."));
   } else if (readyChildren.length > 0) {
     console.log(`Would implement #${readyChildren[0].id} next.`);
   } else if (blockedReadyChildren.length > 0) {
     console.log(
-      `Would stop: no ready child is unblocked (${blockedReadyChildren.map((child) => `#${child.id}`).join(", ")}).`
+      chalk.yellow(
+        `Would stop: no ready child is unblocked (${blockedReadyChildren.map((child) => `#${child.id}`).join(", ")}).`,
+      ),
     );
   } else {
     console.log("Would run final spec review.");
@@ -1801,10 +1805,10 @@ type StandaloneRunResult = {
 };
 
 async function getStandaloneEligibilityErrorDetail(
-  issueId: string
+  issueId: string,
 ): Promise<string | undefined> {
   const issue = (await getOpenReadyIssues()).find(
-    (candidate) => candidate.id === issueId
+    (candidate) => candidate.id === issueId,
   );
 
   if (!issue) {
@@ -1826,8 +1830,8 @@ async function getStandaloneEligibilityErrorDetail(
   const openBlockers = (
     await Promise.all(
       details.blockerIds.map(async (blockerId) =>
-        (await isIssueClosed(blockerId)) ? undefined : blockerId
-      )
+        (await isIssueClosed(blockerId)) ? undefined : blockerId,
+      ),
     )
   ).filter((blockerId): blockerId is string => blockerId !== undefined);
   if (openBlockers.length > 0) {
@@ -1843,7 +1847,7 @@ type StandaloneEligibilityError = {
 };
 
 async function getStandaloneEligibilityError(
-  issueId: string
+  issueId: string,
 ): Promise<StandaloneEligibilityError | undefined> {
   try {
     const detail = await getStandaloneEligibilityErrorDetail(issueId);
@@ -1857,12 +1861,12 @@ async function getStandaloneEligibilityError(
 }
 
 async function runStandaloneIssue(
-  issue: ReadyIssue
+  issue: ReadyIssue,
 ): Promise<StandaloneRunResult> {
   const initialEligibilityError = await getStandaloneEligibilityError(issue.id);
   if (initialEligibilityError) {
     console.warn(
-      `WARNING: Skipping standalone issue because GitHub issue state changed: ${initialEligibilityError.detail}`
+      `WARNING: Skipping standalone issue because GitHub issue state changed: ${initialEligibilityError.detail}`,
     );
     return {
       outcome:
@@ -1913,13 +1917,13 @@ async function runStandaloneIssue(
       const runName = createRunName(
         "standalone-implementer",
         AGENT_CONFIG.implementer.model,
-        AGENT_CONFIG.implementer.effort
+        AGENT_CONFIG.implementer.effort,
       );
       announceAgentStart(runName, branch);
 
       const logPath = await createLogPath(
         `issue-${issue.id}`,
-        "standalone-implementer"
+        "standalone-implementer",
       );
       const implement = await runAgentPhase<ImplementerOutcome>({
         phase: "Standalone implementer",
@@ -1936,7 +1940,7 @@ async function runStandaloneIssue(
               ...verificationPromptArgs,
               ISSUE_ID: issue.id,
               PROJECT_GUIDANCE: promptFiles.getGuidance(
-                "standalone-implement-prompt.md"
+                "standalone-implement-prompt.md",
               ),
             },
             logging: { type: "file", path: logPath },
@@ -1957,25 +1961,25 @@ async function runStandaloneIssue(
         (await getBranchCommit(branch)) === branchCommitBeforeImplementation
       ) {
         throw new Error(
-          "Standalone implementer reported success without creating a commit."
+          "Standalone implementer reported success without creating a commit.",
         );
       }
     } else {
       console.log(
-        `Reusing committed standalone implementation on ${branch}; checking whether to continue review or jump to merger.`
+        `Reusing committed standalone implementation on ${branch}; checking whether to continue review or jump to merger.`,
       );
       jumpToMerger = await shouldSkipReviewerAfterRerun(
         branch,
         issue.id,
-        "standalone"
+        "standalone",
       );
       if (jumpToMerger) {
         console.log(
-          `Last commit appears to be from Sandcastle reviewer for #${issue.id}; skipping standalone reviewer and jumping to merger.`
+          `Last commit appears to be from Sandcastle reviewer for #${issue.id}; skipping standalone reviewer and jumping to merger.`,
         );
       } else {
         console.log(
-          `Last commit for ${branch} does not indicate a completed standalone review for #${issue.id}; continuing to reviewer.`
+          `Last commit for ${branch} does not indicate a completed standalone review for #${issue.id}; continuing to reviewer.`,
         );
       }
     }
@@ -1983,7 +1987,7 @@ async function runStandaloneIssue(
     const eligibilityError = await getStandaloneEligibilityError(issue.id);
     if (eligibilityError) {
       console.warn(
-        `WARNING: Skipping standalone review because GitHub issue state changed: ${eligibilityError.detail}`
+        `WARNING: Skipping standalone review because GitHub issue state changed: ${eligibilityError.detail}`,
       );
       return { outcome: "stopped" };
     }
@@ -1991,12 +1995,12 @@ async function runStandaloneIssue(
     if (!jumpToMerger) {
       const reviewLogPath = await createLogPath(
         `issue-${issue.id}`,
-        "standalone-reviewer"
+        "standalone-reviewer",
       );
       const runName = createRunName(
         "standalone-reviewer",
         AGENT_CONFIG.reviewer.model,
-        AGENT_CONFIG.reviewer.effort
+        AGENT_CONFIG.reviewer.effort,
       );
       announceAgentStart(runName, branch);
 
@@ -2017,7 +2021,7 @@ async function runStandaloneIssue(
               BRANCH: branch,
               ISSUE_ID: issue.id,
               PROJECT_GUIDANCE: promptFiles.getGuidance(
-                "standalone-review-prompt.md"
+                "standalone-review-prompt.md",
               ),
             },
             logging: { type: "file", path: reviewLogPath },
@@ -2047,7 +2051,7 @@ async function runStandaloneIssue(
       if (sandboxOperationError !== undefined) {
         throw new AggregateError(
           [sandboxOperationError, error],
-          "Sandbox operation and closure both failed."
+          "Sandbox operation and closure both failed.",
         );
       }
       throw error;
@@ -2056,7 +2060,7 @@ async function runStandaloneIssue(
 
   if (sandboxCloseResult?.preservedWorktreePath) {
     console.warn(
-      `WARNING: Sandcastle preserved a dirty standalone worktree at ${sandboxCloseResult.preservedWorktreePath}.`
+      `WARNING: Sandcastle preserved a dirty standalone worktree at ${sandboxCloseResult.preservedWorktreePath}.`,
     );
     process.exitCode = 1;
     return { outcome: "aborted" };
@@ -2070,20 +2074,20 @@ async function runStandaloneIssue(
   const mergerEligibilityError = await getStandaloneEligibilityError(issue.id);
   if (mergerEligibilityError) {
     console.warn(
-      `WARNING: Skipping standalone merge because GitHub issue state changed: ${mergerEligibilityError.detail}`
+      `WARNING: Skipping standalone merge because GitHub issue state changed: ${mergerEligibilityError.detail}`,
     );
     return { outcome: "stopped" };
   }
 
   const verificationWorktreePaths = getVerificationWorktreePaths(
     projectRoot,
-    issue.id
+    issue.id,
   );
   const verificationWorktreePath = verificationWorktreePaths.hostPath;
   await writeMergerRecoveryMarker(
     baseSnapshot.branch,
     branch,
-    verificationWorktreePath
+    verificationWorktreePath,
   );
 
   try {
@@ -2091,7 +2095,7 @@ async function runStandaloneIssue(
   } catch (error) {
     const recovered = await recoverMergerState(
       baseSnapshot.branch,
-      verificationWorktreePath
+      verificationWorktreePath,
     );
     if (recovered) {
       try {
@@ -2100,7 +2104,7 @@ async function runStandaloneIssue(
         process.exitCode = 1;
         throw new AggregateError(
           [error, markerError],
-          "Merger setup failed and its recovery marker could not be cleared."
+          "Merger setup failed and its recovery marker could not be cleared.",
         );
       }
       throw error;
@@ -2111,10 +2115,10 @@ async function runStandaloneIssue(
       [
         error,
         new Error(
-          `Merger setup recovery failed. Preserved ${mergerRecoveryPath}.`
+          `Merger setup recovery failed. Preserved ${mergerRecoveryPath}.`,
         ),
       ],
-      "Merger setup and recovery both failed."
+      "Merger setup and recovery both failed.",
     );
   }
 
@@ -2126,14 +2130,14 @@ async function runStandaloneIssue(
   let mergerOperationError: unknown;
   const mergerLogPath = await createLogPath(
     `issue-${issue.id}`,
-    "standalone-merger"
+    "standalone-merger",
   );
 
   try {
     const runName = createRunName(
       "standalone-merger",
       AGENT_CONFIG.merger.model,
-      AGENT_CONFIG.merger.effort
+      AGENT_CONFIG.merger.effort,
     );
     announceAgentStart(runName, baseSnapshot.branch);
 
@@ -2146,7 +2150,7 @@ async function runStandaloneIssue(
         withSandboxNodeModulesOverlay(
           path.posix.join(
             verificationWorktreePaths.sandboxPath,
-            "node_modules"
+            "node_modules",
           ),
           (overlay) =>
             sandcastle.run({
@@ -2169,13 +2173,13 @@ async function runStandaloneIssue(
                 BRANCH: branch,
                 ISSUE_ID: issue.id,
                 PROJECT_GUIDANCE: promptFiles.getGuidance(
-                  "standalone-merge-prompt.md"
+                  "standalone-merge-prompt.md",
                 ),
                 VERIFICATION_WORKTREE_PATH:
                   verificationWorktreePaths.sandboxPath,
               },
               logging: { type: "file", path: mergerLogPath },
-            })
+            }),
         ),
     });
 
@@ -2194,7 +2198,7 @@ async function runStandaloneIssue(
         /base branch moved|base guard failed/i.test(mergerDetail)
       ) {
         console.warn(
-          "The base branch may have changed because of a manual commit, cleanup/config commit, another Sandcastle process, or an automated hook or scheduled job."
+          "The base branch may have changed because of a manual commit, cleanup/config commit, another Sandcastle process, or an automated hook or scheduled job.",
         );
       }
     }
@@ -2205,7 +2209,7 @@ async function runStandaloneIssue(
     if (!mergerSucceeded) {
       const recovered = await recoverMergerState(
         baseSnapshot.branch,
-        verificationWorktreePath
+        verificationWorktreePath,
       );
       if (recovered) {
         try {
@@ -2216,11 +2220,11 @@ async function runStandaloneIssue(
           if (mergerOperationError !== undefined) {
             throw new AggregateError(
               [mergerOperationError, markerError],
-              "Standalone merger phase succeeded in recovery, but its marker could not be cleared."
+              "Standalone merger phase succeeded in recovery, but its marker could not be cleared.",
             );
           }
           console.warn(
-            `WARNING: Standalone merger recovery marker could not be cleared. Preserved ${mergerRecoveryPath}. ${formatDiagnostic(markerError)}`
+            `WARNING: Standalone merger recovery marker could not be cleared. Preserved ${mergerRecoveryPath}. ${formatDiagnostic(markerError)}`,
           );
         }
       } else {
@@ -2231,10 +2235,10 @@ async function runStandaloneIssue(
             [
               mergerOperationError,
               new Error(
-                `Standalone merger recovery failed. Preserved ${mergerRecoveryPath}.`
+                `Standalone merger recovery failed. Preserved ${mergerRecoveryPath}.`,
               ),
             ],
-            "Standalone merger phase and recovery both failed."
+            "Standalone merger phase and recovery both failed.",
           );
         }
       }
@@ -2260,7 +2264,7 @@ async function runStandaloneIssue(
 
   if (!(await removeVerificationWorktree(verificationWorktreePath))) {
     console.warn(
-      `WARNING: Standalone issue #${issue.id} may already be integrated and closed, but host cleanup failed. The runner will not roll back the merge or reopen the issue.`
+      `WARNING: Standalone issue #${issue.id} may already be integrated and closed, but host cleanup failed. The runner will not roll back the merge or reopen the issue.`,
     );
     process.exitCode = 1;
     return {
@@ -2280,24 +2284,24 @@ async function runStandaloneIssue(
 
     if (baseCommit !== issueCommit) {
       throw new Error(
-        `Standalone merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`
+        `Standalone merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`,
       );
     }
     if (checkedOutBranch !== baseSnapshot.branch) {
       throw new Error(
-        `Standalone merger left ${checkedOutBranch} checked out instead of ${baseSnapshot.branch}.`
+        `Standalone merger left ${checkedOutBranch} checked out instead of ${baseSnapshot.branch}.`,
       );
     }
     if (!issueClosed) {
       throw new Error(
-        `Standalone merger reported success, but issue #${issue.id} remains open.`
+        `Standalone merger reported success, but issue #${issue.id} remains open.`,
       );
     }
   } catch (error) {
     await recoverAfterMergerValidationFailure(
       error,
       baseSnapshot.branch,
-      verificationWorktreePath
+      verificationWorktreePath,
     );
   }
 
@@ -2327,21 +2331,25 @@ if (!isDryRun) {
   await requirePrivateDirectory(projectPath(".sandcastle"));
   await requirePrivateDirectory(projectPath(".sandcastle", "worktrees"));
   await requirePrivateDirectory(
-    projectPath(".sandcastle", "node-modules-overlays")
+    projectPath(".sandcastle", "node-modules-overlays"),
   );
   runLock = await acquireRunLock(projectPath(".sandcastle", "run.lock"));
   const staleOverlayCleanup = await cleanupStaleNodeModulesOverlays(
-    nodeModulesOverlayRoot
+    nodeModulesOverlayRoot,
   );
   if (staleOverlayCleanup.preserved.length > 0) {
     console.warn(
-      `WARNING: Preserved ${staleOverlayCleanup.preserved.length} node_modules overlay(s) with live, malformed, or unverifiable ownership.`
+      `WARNING: Preserved ${staleOverlayCleanup.preserved.length} node_modules overlay(s) with live, malformed, or unverifiable ownership.`,
     );
   }
 }
 
 const recoverySucceeded = isDryRun || (await recoverInterruptedMerger());
 if (recoverySucceeded) {
+  if (isDryRun) {
+    console.log(`\n\nMax iterations: ${MAX_ITERATIONS}`);
+  }
+
   iterationLoop: for (
     let iteration = 1;
     iteration <= MAX_ITERATIONS;
@@ -2356,9 +2364,11 @@ if (recoverySucceeded) {
       break;
     }
 
-    console.log(
-      chalk.cyan(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`)
-    );
+    if (!isDryRun) {
+      console.log(
+        chalk.blue(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`),
+      );
+    }
 
     let workCandidates: Awaited<ReturnType<typeof getWorkCandidates>>;
     try {
@@ -2403,7 +2413,7 @@ if (recoverySucceeded) {
 
     if (errors.length > 0) {
       console.warn(
-        `WARNING: Sandcastle could not validate native sub-issues:\n${errors.map((error) => `- ${error}`).join("\n")}`
+        `WARNING: Sandcastle could not validate native sub-issues:\n${errors.map((error) => `- ${error}`).join("\n")}`,
       );
       runEndStatus = {
         kind: "stopped",
@@ -2447,13 +2457,13 @@ if (recoverySucceeded) {
         if (standaloneOutcome === "stale-selection") {
           skippedStaleStandaloneSelection = true;
           console.warn(
-            "WARNING: Standalone selection was stale. Trying the next candidate."
+            "WARNING: Standalone selection was stale. Trying the next candidate.",
           );
           continue;
         }
         if (standaloneOutcome !== "merged") {
           console.warn(
-            `Standalone issue outcome: ${standaloneOutcome}. Stopping.`
+            `Standalone issue outcome: ${standaloneOutcome}. Stopping.`,
           );
           runEndStatus = {
             kind:
@@ -2476,7 +2486,7 @@ if (recoverySucceeded) {
           await deleteReviewedBranch(standaloneBranch);
         } catch (error) {
           console.warn(
-            `WARNING: Standalone issue #${standaloneIssue.id} merged and closed, but reviewed branch ${standaloneBranch} could not be deleted.`
+            `WARNING: Standalone issue #${standaloneIssue.id} merged and closed, but reviewed branch ${standaloneBranch} could not be deleted.`,
           );
           console.error(error);
           runEndStatus = {
@@ -2493,7 +2503,7 @@ if (recoverySucceeded) {
       }
 
       console.warn(
-        "WARNING: All standalone candidates were stale. Replanning."
+        "WARNING: All standalone candidates were stale. Replanning.",
       );
       continue iterationLoop;
     }
@@ -2520,7 +2530,7 @@ if (recoverySucceeded) {
 
     if (!selectedSpec) {
       console.warn(
-        `WARNING: Selected spec #${runSpecIssueId} is no longer an open ready-for-agent native parent. Stopping without selecting another spec.`
+        `WARNING: Selected spec #${runSpecIssueId} is no longer an open ready-for-agent native parent. Stopping without selecting another spec.`,
       );
       runEndStatus = {
         kind: "stopped",
@@ -2533,17 +2543,18 @@ if (recoverySucceeded) {
 
     if (selectingFirstSpec && specCandidates.length > 1) {
       console.warn(
-        `WARNING: ${specCandidates.length} open spec issues were found. Processing earliest spec #${selectedSpec.id}; other specs and their children are ignored.`
+        `WARNING: ${specCandidates.length} open spec issues were found. Processing earliest spec #${selectedSpec.id}; other specs and their children are ignored.`,
       );
     }
 
     const unresolvedChildren = selectedSpec.children.filter(
-      (child) => child.status !== "closed" && child.status !== "ready-for-agent"
+      (child) =>
+        child.status !== "closed" && child.status !== "ready-for-agent",
     );
 
     if (unresolvedChildren.length > 0) {
       console.warn(
-        `WARNING: Spec #${selectedSpec.id} has unresolved child issues. Final review will not run:\n${unresolvedChildren.map((child) => `- #${child.id} ${child.title} (${child.status})`).join("\n")}`
+        `WARNING: Spec #${selectedSpec.id} has unresolved child issues. Final review will not run:\n${unresolvedChildren.map((child) => `- #${child.id} ${child.title} (${child.status})`).join("\n")}`,
       );
       runEndStatus = {
         kind: "stopped",
@@ -2565,13 +2576,13 @@ if (recoverySucceeded) {
                 .filter(
                   (blockerId) =>
                     selectedSpec.children.find(
-                      (candidate) => candidate.id === blockerId
-                    )?.status !== "closed"
+                      (candidate) => candidate.id === blockerId,
+                    )?.status !== "closed",
                 )
                 .map((blockerId) => `#${blockerId}`)
-                .join(", ")}`
+                .join(", ")}`,
           )
-          .join("\n")}`
+          .join("\n")}`,
       );
       runEndStatus = {
         kind: "stopped",
@@ -2591,7 +2602,7 @@ if (recoverySucceeded) {
       }
 
       console.log(
-        `Spec #${selectedSpec.id} has no open ready-for-agent child issues. Running final spec review.`
+        `Spec #${selectedSpec.id} has no open ready-for-agent child issues. Running final spec review.`,
       );
       const finalSpecReview = await runFinalSpecReview(selectedSpec.id);
       const finalSpecOutcome = finalSpecReview.outcome;
@@ -2609,19 +2620,19 @@ if (recoverySucceeded) {
 
       if (finalSpecOutcome === "closed" && !specIssueClosed) {
         console.warn(
-          `WARNING: Final reviewer reported closure, but spec issue #${selectedSpec.id} remains open.`
+          `WARNING: Final reviewer reported closure, but spec issue #${selectedSpec.id} remains open.`,
         );
         throw new Error(
-          `Final reviewer reported closure, but spec issue #${selectedSpec.id} remains open.`
+          `Final reviewer reported closure, but spec issue #${selectedSpec.id} remains open.`,
         );
       }
 
       if (finalSpecOutcome !== "closed" && specIssueClosed) {
         console.warn(
-          `WARNING: Final reviewer reported ${finalSpecOutcome}, but spec issue #${selectedSpec.id} is closed.`
+          `WARNING: Final reviewer reported ${finalSpecOutcome}, but spec issue #${selectedSpec.id} is closed.`,
         );
         throw new Error(
-          `Final reviewer reported ${finalSpecOutcome}, but spec issue #${selectedSpec.id} is closed.`
+          `Final reviewer reported ${finalSpecOutcome}, but spec issue #${selectedSpec.id} is closed.`,
         );
       }
 
@@ -2661,7 +2672,8 @@ if (recoverySucceeded) {
       sandboxPath: "node_modules",
     });
     let sandbox:
-      Awaited<ReturnType<typeof sandcastle.createSandbox>> | undefined;
+      | Awaited<ReturnType<typeof sandcastle.createSandbox>>
+      | undefined;
     let sandboxOperationError: unknown;
     let sandboxCloseResult:
       | Awaited<
@@ -2689,20 +2701,20 @@ if (recoverySucceeded) {
       let jumpToMerger = false;
       if (reusingImplementation) {
         console.log(
-          `Reusing committed implementation on ${branch}; checking whether to continue review or jump to merger.`
+          `Reusing committed implementation on ${branch}; checking whether to continue review or jump to merger.`,
         );
         jumpToMerger = await shouldSkipReviewerAfterRerun(
           branch,
           plannedIssue.id,
-          "spec"
+          "spec",
         );
         if (jumpToMerger) {
           console.log(
-            `Last commit appears to be from Sandcastle reviewer for #${plannedIssue.id}; skipping reviewer and jumping to merger.`
+            `Last commit appears to be from Sandcastle reviewer for #${plannedIssue.id}; skipping reviewer and jumping to merger.`,
           );
         } else {
           console.log(
-            `Last commit for ${branch} does not indicate a completed spec review for #${plannedIssue.id}; continuing to reviewer.`
+            `Last commit for ${branch} does not indicate a completed spec review for #${plannedIssue.id}; continuing to reviewer.`,
           );
         }
       } else {
@@ -2712,13 +2724,13 @@ if (recoverySucceeded) {
         const runName = createRunName(
           "implementer",
           AGENT_CONFIG.implementer.model,
-          AGENT_CONFIG.implementer.effort
+          AGENT_CONFIG.implementer.effort,
         );
         announceAgentStart(runName, branch);
 
         const logPath = await createLogPath(
           `issue-${plannedIssue.id}`,
-          "implementer"
+          "implementer",
         );
         const implement = await runAgentPhase<ImplementerOutcome>({
           phase: "Implementer",
@@ -2735,7 +2747,7 @@ if (recoverySucceeded) {
                 ...verificationPromptArgs,
                 ISSUE_ID: plannedIssue.id,
                 PROJECT_GUIDANCE: promptFiles.getGuidance(
-                  "implement-prompt.md"
+                  "implement-prompt.md",
                 ),
                 SPEC_ISSUE_ID: selectedSpec.id,
               },
@@ -2759,7 +2771,7 @@ if (recoverySucceeded) {
           branchCommitAfterImplementation === branchCommitBeforeImplementation
         ) {
           throw new Error(
-            "Implementer reported success without creating a commit."
+            "Implementer reported success without creating a commit.",
           );
         }
 
@@ -2768,11 +2780,11 @@ if (recoverySucceeded) {
 
       const reviewEligibilityError = await getSelectedIssueEligibilityError(
         selectedSpec.id,
-        plannedIssue.id
+        plannedIssue.id,
       );
       if (reviewEligibilityError) {
         console.warn(
-          `WARNING: Skipping review because GitHub issue relationships changed: ${reviewEligibilityError}`
+          `WARNING: Skipping review because GitHub issue relationships changed: ${reviewEligibilityError}`,
         );
         runEndStatus = {
           kind: "stopped",
@@ -2791,12 +2803,12 @@ if (recoverySucceeded) {
       if (!jumpToMerger) {
         const reviewLogPath = await createLogPath(
           `issue-${plannedIssue.id}`,
-          "reviewer"
+          "reviewer",
         );
         const runName = createRunName(
           "reviewer",
           AGENT_CONFIG.reviewer.model,
-          AGENT_CONFIG.reviewer.effort
+          AGENT_CONFIG.reviewer.effort,
         );
         announceAgentStart(runName, branch);
 
@@ -2816,9 +2828,7 @@ if (recoverySucceeded) {
                 BASE_COMMIT: baseSnapshot.commit,
                 BRANCH: branch,
                 ISSUE_ID: plannedIssue.id,
-                PROJECT_GUIDANCE: promptFiles.getGuidance(
-                  "review-prompt.md"
-                ),
+                PROJECT_GUIDANCE: promptFiles.getGuidance("review-prompt.md"),
                 SPEC_ISSUE_ID: selectedSpec.id,
               },
               logging: { type: "file", path: reviewLogPath },
@@ -2851,7 +2861,7 @@ if (recoverySucceeded) {
         if (sandboxOperationError !== undefined) {
           throw new AggregateError(
             [sandboxOperationError, error],
-            "Sandbox operation and closure both failed."
+            "Sandbox operation and closure both failed.",
           );
         }
         throw error;
@@ -2860,7 +2870,7 @@ if (recoverySucceeded) {
 
     if (sandboxCloseResult?.preservedWorktreePath) {
       console.warn(
-        `WARNING: Sandcastle preserved a dirty issue worktree at ${sandboxCloseResult.preservedWorktreePath}. Stopping before merge.`
+        `WARNING: Sandcastle preserved a dirty issue worktree at ${sandboxCloseResult.preservedWorktreePath}. Stopping before merge.`,
       );
       runEndStatus = {
         kind: "aborted",
@@ -2881,11 +2891,11 @@ if (recoverySucceeded) {
 
     const mergerEligibilityError = await getSelectedIssueEligibilityError(
       selectedSpec.id,
-      plannedIssue.id
+      plannedIssue.id,
     );
     if (mergerEligibilityError) {
       console.warn(
-        `WARNING: Skipping merge because GitHub issue relationships changed: ${mergerEligibilityError}`
+        `WARNING: Skipping merge because GitHub issue relationships changed: ${mergerEligibilityError}`,
       );
       runEndStatus = {
         kind: "stopped",
@@ -2896,13 +2906,13 @@ if (recoverySucceeded) {
 
     const verificationWorktreePaths = getVerificationWorktreePaths(
       projectRoot,
-      plannedIssue.id
+      plannedIssue.id,
     );
     const verificationWorktreePath = verificationWorktreePaths.hostPath;
     await writeMergerRecoveryMarker(
       baseSnapshot.branch,
       branch,
-      verificationWorktreePath
+      verificationWorktreePath,
     );
 
     try {
@@ -2910,7 +2920,7 @@ if (recoverySucceeded) {
     } catch (error) {
       const recovered = await recoverMergerState(
         baseSnapshot.branch,
-        verificationWorktreePath
+        verificationWorktreePath,
       );
       if (recovered) {
         try {
@@ -2919,7 +2929,7 @@ if (recoverySucceeded) {
           process.exitCode = 1;
           throw new AggregateError(
             [error, markerError],
-            "Merger setup failed and its recovery marker could not be cleared."
+            "Merger setup failed and its recovery marker could not be cleared.",
           );
         }
         throw error;
@@ -2930,10 +2940,10 @@ if (recoverySucceeded) {
         [
           error,
           new Error(
-            `Merger setup recovery failed. Preserved ${mergerRecoveryPath}.`
+            `Merger setup recovery failed. Preserved ${mergerRecoveryPath}.`,
           ),
         ],
-        "Merger setup and recovery both failed."
+        "Merger setup and recovery both failed.",
       );
     }
 
@@ -2945,14 +2955,14 @@ if (recoverySucceeded) {
     let mergerOperationError: unknown;
     const mergerLogPath = await createLogPath(
       `issue-${plannedIssue.id}`,
-      "merger"
+      "merger",
     );
 
     try {
       const runName = createRunName(
         "merger",
         AGENT_CONFIG.merger.model,
-        AGENT_CONFIG.merger.effort
+        AGENT_CONFIG.merger.effort,
       );
       announceAgentStart(runName, baseSnapshot.branch);
 
@@ -2965,7 +2975,7 @@ if (recoverySucceeded) {
           withSandboxNodeModulesOverlay(
             path.posix.join(
               verificationWorktreePaths.sandboxPath,
-              "node_modules"
+              "node_modules",
             ),
             (overlay) =>
               sandcastle.run({
@@ -2993,7 +3003,7 @@ if (recoverySucceeded) {
                     verificationWorktreePaths.sandboxPath,
                 },
                 logging: { type: "file", path: mergerLogPath },
-              })
+              }),
           ),
       });
 
@@ -3012,7 +3022,7 @@ if (recoverySucceeded) {
           /base branch moved|base guard failed/i.test(mergerDetail)
         ) {
           console.warn(
-            "The base branch may have changed because of a manual commit, cleanup/config commit, another Sandcastle process, or an automated hook or scheduled job."
+            "The base branch may have changed because of a manual commit, cleanup/config commit, another Sandcastle process, or an automated hook or scheduled job.",
           );
         }
       }
@@ -3023,7 +3033,7 @@ if (recoverySucceeded) {
       if (!mergerSucceeded) {
         const recovered = await recoverMergerState(
           baseSnapshot.branch,
-          verificationWorktreePath
+          verificationWorktreePath,
         );
 
         if (recovered) {
@@ -3035,11 +3045,11 @@ if (recoverySucceeded) {
             if (mergerOperationError !== undefined) {
               throw new AggregateError(
                 [mergerOperationError, markerError],
-                "Merger phase succeeded in recovery, but its marker could not be cleared."
+                "Merger phase succeeded in recovery, but its marker could not be cleared.",
               );
             }
             console.warn(
-              `WARNING: Merger recovery marker could not be cleared. Preserved ${mergerRecoveryPath}. ${formatDiagnostic(markerError)}`
+              `WARNING: Merger recovery marker could not be cleared. Preserved ${mergerRecoveryPath}. ${formatDiagnostic(markerError)}`,
             );
           }
         } else {
@@ -3050,10 +3060,10 @@ if (recoverySucceeded) {
               [
                 mergerOperationError,
                 new Error(
-                  `Merger recovery failed. Preserved ${mergerRecoveryPath}.`
+                  `Merger recovery failed. Preserved ${mergerRecoveryPath}.`,
                 ),
               ],
-              "Merger phase and recovery both failed."
+              "Merger phase and recovery both failed.",
             );
           }
         }
@@ -3080,7 +3090,7 @@ if (recoverySucceeded) {
 
     if (!(await removeVerificationWorktree(verificationWorktreePath))) {
       console.warn(
-        `WARNING: Issue #${plannedIssue.id} may already be integrated and closed, but host cleanup failed. The runner will not roll back the merge or reopen the issue.`
+        `WARNING: Issue #${plannedIssue.id} may already be integrated and closed, but host cleanup failed. The runner will not roll back the merge or reopen the issue.`,
       );
       runEndStatus = {
         kind: "aborted",
@@ -3101,35 +3111,35 @@ if (recoverySucceeded) {
 
       if (baseCommit !== issueCommit) {
         console.warn(
-          `WARNING: Merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`
+          `WARNING: Merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`,
         );
         throw new Error(
-          `Merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`
+          `Merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`,
         );
       }
 
       if (checkedOutBranch !== baseSnapshot.branch) {
         console.warn(
-          `WARNING: Merger reported success, but ${checkedOutBranch} is checked out instead of ${baseSnapshot.branch}.`
+          `WARNING: Merger reported success, but ${checkedOutBranch} is checked out instead of ${baseSnapshot.branch}.`,
         );
         throw new Error(
-          `Merger left ${checkedOutBranch} checked out instead of ${baseSnapshot.branch}.`
+          `Merger left ${checkedOutBranch} checked out instead of ${baseSnapshot.branch}.`,
         );
       }
 
       if (!issueClosed) {
         console.warn(
-          `WARNING: Merger reported success, but issue #${plannedIssue.id} remains open.`
+          `WARNING: Merger reported success, but issue #${plannedIssue.id} remains open.`,
         );
         throw new Error(
-          `Merger reported success, but issue #${plannedIssue.id} remains open.`
+          `Merger reported success, but issue #${plannedIssue.id} remains open.`,
         );
       }
     } catch (error) {
       await recoverAfterMergerValidationFailure(
         error,
         baseSnapshot.branch,
-        verificationWorktreePath
+        verificationWorktreePath,
       );
     }
 
@@ -3137,7 +3147,7 @@ if (recoverySucceeded) {
       await deleteReviewedBranch(branch);
     } catch (error) {
       console.warn(
-        `WARNING: Merge succeeded and issue #${plannedIssue.id} is closed, but reviewed branch ${branch} could not be deleted.`
+        `WARNING: Merge succeeded and issue #${plannedIssue.id} is closed, but reviewed branch ${branch} could not be deleted.`,
       );
       console.error(error);
       runEndStatus = {
@@ -3198,7 +3208,8 @@ if (runLock !== undefined) {
     console.error(`ERROR: ${formatDiagnostic(error)}`);
     runEndStatus = {
       kind: "aborted",
-      reason: "The workflow finished, but its active-run lock could not be released safely.",
+      reason:
+        "The workflow finished, but its active-run lock could not be released safely.",
     };
     process.exitCode = 1;
   }

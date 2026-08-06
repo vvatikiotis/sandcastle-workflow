@@ -23,7 +23,7 @@ const fixturePath = path.resolve(
   "run-completion.fixture.ts"
 );
 const ansi = {
-  cyan: "\u001b[36m",
+  blue: "\u001b[34m",
   green: "\u001b[32m",
   yellow: "\u001b[33m",
   red: "\u001b[31m",
@@ -1308,7 +1308,7 @@ fi
 
     assert.equal(result.code, 0);
     assert.equal(result.stdout.match(/SANDCASTLE RUN:/g)?.length, 1);
-    assert.ok(result.stdout.includes(`${ansi.cyan}SANDCASTLE RUN:`));
+    assert.ok(result.stdout.includes(`${ansi.blue}SANDCASTLE RUN:`));
     assert.ok(result.stdout.includes(`${ansi.green}COMPLETED`));
     assert.ok(result.stdout.includes(`${ansi.green}yes`));
   });

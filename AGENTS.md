@@ -1,22 +1,22 @@
 # Agent instructions
 
-- Issues and specifications live in `vvatikiotis/sandcastle-workflow` GitHub Issues.
-- Read `CODING_STANDARDS.md`, `CONTEXT.md`, and applicable records under `docs/adr/` before changing code.
-- Preserve the GitHub-native Control Plane defined by ADR-0001.
-- Treat architectural decision records and their index as owner-authored and read-only during autonomous implementation.
-- Use the packaged-artifact command seam for user-visible behavior tests.
-- Keep changes small and avoid generalizing beyond spec #1.
+## Before changing code
 
-## Agent skills
+1. Identify the GitHub Issue that owns the work and use its specification and acceptance criteria as the scope. For work without an Issue, state the scope and acceptance criteria from the user's request before implementation; resolve any ambiguity with the user first.
+2. Read `CODING_STANDARDS.md`, `CONTEXT.md`, and `docs/adr/README.md`. From the index, read each ADR governing a component, interface, state, or workflow behavior the change touches. Complete this step only after every applicable rule and decision is accounted for in the change.
+3. Preserve the GitHub-native Control Plane defined by ADR-0001.
+4. Keep the implementation tight to the established scope and acceptance criteria.
 
-### Issue tracker
+## Verification
 
-Issues and specifications are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+Exercise user-visible behavior through the packaged-artifact command seam. Verify the resulting artifact, rather than testing only internal source paths.
 
-### Triage labels
+## Conditional references
 
-The repository uses the five default Matt Pocock skill triage labels. See `docs/agents/triage-labels.md`.
+- When retrieving or interpreting an Issue specification, read `docs/agents/issue-tracker.md` first.
+- When assigning triage labels, read `docs/agents/triage-labels.md` first.
+- When exploring code or using domain terminology, read `docs/agents/domain.md` first.
 
-### Domain docs
+## Ownership
 
-The repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.
+Architectural decision records and their index are owner-authored. Treat them as read-only during autonomous implementation.

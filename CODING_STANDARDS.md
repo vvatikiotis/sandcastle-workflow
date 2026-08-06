@@ -1,191 +1,89 @@
-# CODING_STANDARDS
+# Coding standards
 
-## Scope
+## Scope and priorities
 
-These standards apply to TypeScript and JavaScript changes in this repo.
+These standards apply to TypeScript and JavaScript changes in this repository.
 
-Follow these rules pragmatically. Prefer correctness, clarity, and small safe changes over strict rule-chasing.
+Apply priorities in this order:
 
-## Priorities
+1. Preserve existing behavior unless the task explicitly changes it.
+2. Make the smallest local change that is clear and reviewable.
+3. Keep domain logic separate from I/O, command-line glue, and filesystem concerns.
+4. Match the surrounding code style and repository tooling.
 
-1. Preserve behavior unless the task explicitly changes behavior.
-2. Prefer small, local, reviewable changes.
-3. Keep domain logic clear and separate from I/O, CLI glue, and filesystem concerns.
-4. Match the surrounding file's style unless this document or automated tooling requires otherwise.
+A specific rule below overrides a general priority when it states an exception. Otherwise, follow the higher priority and record the reason for any exception.
 
-## TypeScript
+## Types
 
 - Strongly prefer TypeScript for new source files.
 - Prefer explicit, narrow types over broad object shapes.
-- Prefer `unknown` over `any` when the type is not yet known.
-- Use `any` only when it is the least bad option. Keep it local and documented.
-- Add explicit return types to exported functions.
+- Use `unknown` when a value's type is not known. Use `any` only when it is the least bad option; keep it local and document why it is required.
+- Give exported functions explicit return types.
 - Prefer unions and discriminated unions over boolean mode flags.
-- Avoid type assertions (`as`) when a proper type guard or refactor can remove them.
-- Use `type` and `interface` pragmatically. Do not churn code just to convert one to the other.
+- Use a type guard or a design change instead of a type assertion when either removes the assertion safely.
+- Choose `type` or `interface` pragmatically; do not convert between them without a concrete benefit.
 
 ## Functions and modules
 
-- Optional parameters passed to functions should be scrutinized extremely carefully. They are a huge source of bugs (by omission). Prioritize correctness over backwards compatibility.
-- Keep functions focused on one job.
-- Prefer small helper functions over deeply nested logic.
-- Prefer early returns over nested conditionals.
-- If a function needs many parameters, prefer a typed object parameter.
-- Keep modules cohesive. Avoid “god files” that mix unrelated responsibilities.
-- Keep exports minimal.
+- Treat optional parameters as API decisions. Add one only when omission has defined behavior, and test both omitted and supplied cases when the distinction matters. For optional-parameter APIs, correctness takes priority over backward compatibility.
+- Keep each function focused on one job.
+- Use early returns and small helpers to keep branching shallow.
+- Group many related parameters into a typed object.
+- Keep modules cohesive and exports minimal. Put unrelated responsibilities in separate modules.
 
-## State and data
+## State and control flow
 
-- Prefer `const`. Use `let` only when reassignment is needed.
-- Never use `var`.
-- Prefer immutable transformations unless mutation is clearly simpler and local.
-- Do not reuse variables for unrelated meanings.
-
-## Control flow
-
-- Prefer `===` and `!==`.
-- Be explicit when `0`, `false`, `""`, `null`, and `undefined` mean different things.
-- Use exhaustive branching for discriminated unions where practical.
-- Prefer clear branching over compact clever expressions.
+- Declare variables with `const` or `let`; use `let` only for reassignment. `var` is prohibited.
+- Prefer immutable transformations unless local mutation is clearer and safe.
+- Give each variable one meaning throughout its lifetime.
+- Use `===` and `!==`.
+- Branch explicitly when `0`, `false`, `""`, `null`, and `undefined` have different meanings.
+- Exhaustively handle discriminated unions where practical.
+- Prefer clear branches over compact clever expressions.
 
 ## Async and errors
 
-- Prefer `async` / `await` over long `.then()` chains.
-- Do not leave promises floating unless fire-and-forget is intentional and obvious.
-- Handle failure paths explicitly.
-- Throw `Error` objects, not strings.
-- Include useful context in errors, but do not add noisy boilerplate.
+- Prefer `async` and `await` over long `.then()` chains.
+- Make intentional fire-and-forget promises obvious; await every other promise.
+- Handle failure paths explicitly; silent error swallowing is prohibited.
+- When throwing, use an `Error` object with useful context and without repetitive boilerplate.
 
 ## Comments
 
-- Comment the reason, constraint, or invariant.
-- Do not comment obvious line-by-line behavior.
-- Keep comments accurate when code changes.
-- Preserve useful domain terminology from `CONTEXT.md`.
+Comments explain a reason, constraint, or invariant. They do not narrate obvious line-by-line behavior. Keep them accurate as code changes, and use the domain terminology in `CONTEXT.md`.
 
 ## Tests
 
+Test observable behavior through public interfaces, not implementation details. A refactor should leave tests passing when behavior is unchanged.
+
 - Add or update tests for behavior changes.
-- Cover edge cases when they are relevant to the change.
-- Do not rewrite unrelated tests just to satisfy style preferences.
-- Follow the principles in `## Testing`.
+- Cover relevant edge cases.
+- Keep each test focused on one logical behavior. Use the assertions needed to establish that behavior.
+- Prefer integration-style tests that use real code paths through public APIs.
+- Mock system boundaries only when a real dependency is impractical, such as external APIs, time, randomness, filesystems, or databases.
+- Use real implementations for this repository's classes, modules, and internal collaborators. If that makes behavior difficult to test, redesign the public interface.
+- At system boundaries, prefer SDK-style interfaces over generic fetchers so each operation has one return shape and can be mocked independently.
+- Keep tests independent of private methods, internal collaborator call counts, call order, and storage details.
+- Test a trivial mapping only when it protects a meaningful public contract; a test that merely mirrors the implementation adds little confidence.
+- Leave unrelated tests unchanged; style preferences alone do not justify rewrites.
+
+Work in vertical slices: add one behavior-focused test, implement the smallest change that makes it pass, then refactor only after the test is green. Each changed behavior is complete when its public outcome and relevant edge cases are covered by passing tests.
+
+## Interface design
+
+Prefer deep modules: a small, stable interface should hide substantial implementation complexity. Reduce method count and parameter complexity when the module can safely own more of the work.
+
+Design for testability:
+
+1. Accept external dependencies instead of constructing them inside the unit under test.
+2. Return results instead of producing avoidable side effects; make required side effects explicit in the interface.
+3. Keep the public surface small, with few methods and simple parameters.
 
 ## Editing guidance
 
-When editing this repo:
-
-- Do not introduce new abstractions unless they remove real duplication or clarify a domain seam.
-- Preserve existing public names unless the task explicitly asks to rename them.
-- When touching typed code, improve types locally if it helps clarity or safety.
-- Do not replace pragmatic code with more “pure” or more abstract code unless there is a clear payoff.
-- If lint rules and practical delivery conflict, prefer the pragmatic option and explain the tradeoff.
-
-## Avoid
-
-- Broad speculative refactors
-- Adding dependencies without a clear reason
-- Letting `any` spread through multiple layers
-- Hidden side effects
-- Silent error swallowing
-- Mixing domain logic with CLI, transport, or storage code without a reason
-- Unrelated style-only churn
-
-## Testing
-
-### Core principle
-
-Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests should not break unless behavior changed.
-
-### Good tests
-
-Integration-style tests exercise real code paths through public APIs. They describe _what_ the system does, not _how_.
-
-```typescript
-// GOOD: Tests observable behavior through the public interface
-test("createUser makes user retrievable", async () => {
-  const user = await createUser({ name: "Alice" });
-  const retrieved = await getUser(user.id);
-  expect(retrieved.name).toBe("Alice");
-});
-```
-
-- Test behavior users/callers care about
-- Use the public API only
-- Survive internal refactors
-- One logical assertion per test
-
-### Bad tests
-
-```typescript
-// BAD: Mocks internal collaborator, tests HOW not WHAT
-test("checkout calls paymentService.process", async () => {
-  const mockPayment = jest.mock(paymentService);
-  await checkout(cart, payment);
-  expect(mockPayment.process).toHaveBeenCalledWith(cart.total);
-});
-
-// BAD: Bypasses the interface to verify via database
-test("createUser saves to database", async () => {
-  await createUser({ name: "Alice" });
-  const row = await db.query("SELECT * FROM users WHERE name = ?", ["Alice"]);
-  expect(row).toBeDefined();
-});
-```
-
-```typescript
-// BAD: Test restates the implementation — the function IS the spec
-test("pitchHref includes from param", () => {
-  expect(pitchHref("abc")).toBe("/pitches/abc?from=deliverables");
-});
-```
-
-Red flags:
-
-- Mocking internal collaborators (your own classes/modules)
-- Testing private methods
-- Asserting on call counts/order of internal calls
-- Test breaks when refactoring without behavior change
-- Test name describes HOW not WHAT
-- Verifying through external means (e.g. querying a DB) instead of through the interface
-- Testing a trivial function (one-liner, simple mapping, string concatenation) where the test just mirrors the code — these tests add no confidence and break on any refactor
-- Thin delegation tests for route handlers — when a route's only job is to parse input and call a service method, testing that it "delegates correctly" by mocking the service duplicates the route code in the test. The real behavior lives in the service; test that instead.
-
-### Mocking
-
-Mock at **system boundaries** only:
-
-- External APIs (payment, email, etc.)
-- Time/randomness
-- File system or databases when a real instance isn't practical
-
-**Never mock your own classes/modules or internal collaborators.** If something is hard to test without mocking internals, redesign the interface.
-
-Prefer SDK-style interfaces over generic fetchers at boundaries — each function is independently mockable with a single return shape, no conditional logic in test setup.
-
-### TDD Workflow: Vertical Slices
-
-Do NOT write all tests first, then all implementation. That produces tests that verify _imagined_ behavior and are insensitive to real changes.
-
-Correct approach — one test, one implementation, repeat:
-
-```
-RED→GREEN: test1→impl1
-RED→GREEN: test2→impl2
-RED→GREEN: test3→impl3
-```
-
-Each test responds to what you learned from the previous cycle. Never refactor while RED — get to GREEN first.
-
-## Interface Design
-
-### Deep Modules
-
-Prefer deep modules: small interface, deep implementation. A few methods with simple params hiding complex logic behind them.
-
-Avoid shallow modules: large interface with many methods that just pass through to thin implementation. When designing, ask: can I reduce the number of methods? Can I simplify the parameters? Can I hide more complexity inside?
-
-### Design for Testability
-
-1. **Accept dependencies, don't create them** — pass external dependencies in rather than constructing them internally.
-2. **Return results, don't produce side effects** — a function that returns a value is easier to test than one that mutates state.
-3. **Small surface area** — fewer methods = fewer tests needed, fewer params = simpler test setup.
+- Keep public names stable unless the task explicitly requires a rename.
+- Add an abstraction only when it removes real duplication or clarifies a domain seam.
+- When touching typed code, improve types locally when that increases clarity or safety.
+- Keep pragmatic code when a more abstract or "pure" replacement has no clear payoff.
+- Add dependencies only for a clear requirement.
+- Follow the repository's tooling.
