@@ -4,7 +4,7 @@ This guide explains how to install and run `@vvatikiotis/sandcastle-workflow` in
 
 ## Quick start
 
-These steps install version `0.2.2` in a new pnpm consumer.
+These steps install version `0.3.0` in a new pnpm consumer.
 
 1. **Create the repository**
 
@@ -23,19 +23,19 @@ These steps install version `0.2.2` in a new pnpm consumer.
 
    ```bash
    mkdir vendor
-   cp /path/to/vvatikiotis-sandcastle-workflow-0.2.2.tgz vendor/
+   cp /path/to/vvatikiotis-sandcastle-workflow-0.3.0.tgz vendor/
    ```
 
    On macOS:
 
    ```bash
-   shasum -a 256 vendor/vvatikiotis-sandcastle-workflow-0.2.2.tgz
+   shasum -a 256 vendor/vvatikiotis-sandcastle-workflow-0.3.0.tgz
    ```
 
    On Linux:
 
    ```bash
-   sha256sum vendor/vvatikiotis-sandcastle-workflow-0.2.2.tgz
+   sha256sum vendor/vvatikiotis-sandcastle-workflow-0.3.0.tgz
    ```
 
    Compare the output with the checksum supplied with the reviewed artifact.
@@ -43,7 +43,7 @@ These steps install version `0.2.2` in a new pnpm consumer.
 4. **Install the workflow**
 
    ```bash
-   pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.2.2.tgz
+   pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.3.0.tgz
    ```
 
 5. **Add Sandcastle scripts**
@@ -93,7 +93,7 @@ These steps install version `0.2.2` in a new pnpm consumer.
    exists to create native sub-issue and dependency relationships.
    ```
 
-   Commit the tarball, package manifest, lockfile, `.sandcastle` examples, relative symbolic link, `AGENTS.md`, and `CODING_STANDARDS.md` together. Never commit `.sandcastle/.env` or `.sandcastle/sandcastle.env`.
+   Commit the tarball, package manifest, lockfile, `.sandcastle` examples, relative symbolic link, `AGENTS.md`, and `CODING_STANDARDS.md` together. Keep the active `.sandcastle/.env` and `.sandcastle/sandcastle.env` files ignored and uncommitted.
 
 9. **Prepare GitHub work**
 
@@ -123,7 +123,7 @@ These steps install version `0.2.2` in a new pnpm consumer.
 
 ## Supported environment
 
-Version `0.2.2` supports:
+Version `0.3.0` supports:
 
 - Node.js 22 or newer on macOS and Linux
 - npm 10 or pnpm 11 repositories
@@ -139,7 +139,7 @@ The package is private and local-only. Consumers commit a reviewed tarball under
 The quick start uses pnpm. With npm, install the same reviewed artifact as a relative file dependency:
 
 ```bash
-npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.2.2.tgz
+npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.3.0.tgz
 ```
 
 Use these npm commands in place of the pnpm quick-start commands:
@@ -178,7 +178,16 @@ The underlying executable's help and version options do not require a Git worktr
 
 ## Concurrent runs
 
-A Consumer Repository supports one active mutating workflow run. A normal run owns `.sandcastle/run.lock`; a second normal run stops without changing workflow state. Normal completion removes the lock. Signals, crashes, and unexpected failures preserve it. Do not remove a lock until the recorded process and workflow state confirm that it is stale.
+A Consumer Repository supports one active mutating workflow run. A normal run owns `.sandcastle/run.lock`; a second normal run stops without changing workflow state. Normal completion removes the lock. Signals, crashes, and unexpected failures preserve it.
+
+When a lock remains, inspect its recorded process:
+
+```bash
+LOCK_PID=$(node -p "JSON.parse(require('fs').readFileSync('.sandcastle/run.lock', 'utf8')).pid")
+ps -p "$LOCK_PID" -o pid=,lstart=,command=
+```
+
+A listed process still owns the lock; leave it in place. If `ps` reports that the PID does not exist, the lock is stale. For any other parsing or lookup error, leave the lock in place and investigate. Before removing a stale lock, inspect `.sandcastle/merger-recovery.json`, `.sandcastle/worktrees`, and the latest log, preserving any recovery state for the next run. Remove only `.sandcastle/run.lock`.
 
 `--dry-run`, `--help`, `--version`, initialization, and image building do not use the lock. Repositories have independent locks. New initialization adds `run.lock` to `.sandcastle/.gitignore`.
 
@@ -230,9 +239,7 @@ Monorepositories are supported only when package metadata, lockfile, configurati
 
 ## GitHub control plane
 
-Quick-start step 8 makes the relationship skill discoverable, and step 9 prepares GitHub work. Complete both before the dry run in step 10.
-
-Native GitHub relationships determine all executable work:
+Before the dry run in quick-start step 10, complete steps 8 and 9. Step 8 makes the relationship skill discoverable before an agent publishes specification children; step 9 prepares the required GitHub configuration and work. Native GitHub relationships determine all executable work:
 
 - direct sub-issues define a specification's children;
 - child-to-child blocking edges define eligibility;
@@ -240,7 +247,7 @@ Native GitHub relationships determine all executable work:
 - one specification is selected per invocation;
 - final review runs only after every direct child closes.
 
-Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.2.2` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
+Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.3.0` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
 
 The package includes the required Agent Skills-standard `github-ticket-relationships` skill. Step 8 configures it project-locally. The symbolic link makes the skill discoverable, and the `AGENTS.md` instruction tells agents when to use it. Both are required consumer setup. Initialization prints the installed source path but does not create the link or modify agent settings.
 

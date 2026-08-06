@@ -154,7 +154,7 @@ export async function resolvePackageManager(
     );
     if (match === null) {
       throw new Error(
-        `Unsupported or malformed consumer packageManager declaration: ${declaration}. Version 0.2.2 supports npm 10 and pnpm 11.`
+        `Unsupported or malformed consumer packageManager declaration: ${declaration}. Version 0.3.0 supports npm 10 and pnpm 11.`
       );
     }
     managerName = match[1] === "npm" ? "npm" : "pnpm";
@@ -162,7 +162,7 @@ export async function resolvePackageManager(
     const expectedMajor = supportedManagers[managerName].major;
     if (declaredMajor !== expectedMajor) {
       throw new Error(
-        `Unsupported ${managerName} major ${declaredMajor}. Version 0.2.2 supports ${managerName} ${expectedMajor}.`
+        `Unsupported ${managerName} major ${declaredMajor}. Version 0.3.0 supports ${managerName} ${expectedMajor}.`
       );
     }
   }
