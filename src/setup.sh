@@ -28,6 +28,19 @@ sandcastle_workflow_init() {
 
 sandcastle_workflow_init
 
+script_dir=$(dirname "$0")
+consumer_guide=$script_dir/../@vvatikiotis/sandcastle-workflow/CONSUMER.md
+if [ ! -f "$consumer_guide" ]; then
+  consumer_guide=$script_dir/../CONSUMER.md
+fi
+consumer_destination=.sandcastle/CONSUMER.md
+if [ ! -e "$consumer_destination" ] && [ ! -L "$consumer_destination" ]; then
+  cp "$consumer_guide" "$consumer_destination"
+  printf 'Created %s\n' "$consumer_destination"
+else
+  printf 'Preserving existing %s\n' "$consumer_destination"
+fi
+
 ask_yes_no() {
   prompt=$1
   default=$2

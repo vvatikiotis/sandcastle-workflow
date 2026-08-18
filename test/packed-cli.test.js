@@ -24,7 +24,7 @@ import { after, before, describe, it } from "node:test";
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageName = "@vvatikiotis/sandcastle-workflow";
-const packageVersion = "0.3.3";
+const packageVersion = "0.3.4";
 const validRunnerConfig = [
   "IMPLEMENTER_MODEL=test-model",
   "IMPLEMENTER_EFFORT=low",
@@ -485,6 +485,10 @@ describe("packed CLI", () => {
     assert.doesNotMatch(result.stdout, /^  sandcastle-workflow /m);
     await access(path.join(consumerRoot, ".sandcastle", "sandcastle.env"));
     await access(path.join(consumerRoot, ".sandcastle", ".env"));
+    assert.match(
+      await readFile(path.join(consumerRoot, ".sandcastle", "CONSUMER.md"), "utf8"),
+      /^# Consumer Guide/m
+    );
   });
 
   it("prints npm project commands after guided setup", async () => {
@@ -506,6 +510,10 @@ describe("packed CLI", () => {
     assert.match(result.stdout, /npm run sandcastle -- build-image/);
     assert.match(result.stdout, /npm run sandcastle:dry-run/);
     assert.doesNotMatch(result.stdout, /^  sandcastle-workflow /m);
+    assert.match(
+      await readFile(path.join(consumerRoot, ".sandcastle", "CONSUMER.md"), "utf8"),
+      /^# Consumer Guide/m
+    );
   });
 
   it("does not leave partial configuration when input ends", async () => {
@@ -592,7 +600,7 @@ describe("packed CLI", () => {
       },
     });
 
-    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.3\.3/);
+    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.3\.4/);
     assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
     assert.match(
       result.stdout,
@@ -601,7 +609,7 @@ describe("packed CLI", () => {
     const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
     const fileIndex = dockerArguments.indexOf("--file");
     const tagIndex = dockerArguments.indexOf("--tag");
-    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.3.3");
+    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.3.4");
     assert.match(dockerArguments[fileIndex + 1], /dist\/defaults\/docker\/Dockerfile$/);
     assert.equal(
       dockerArguments.at(-1),
@@ -718,7 +726,7 @@ describe("packed CLI", () => {
         },
       });
 
-      assert.match(result.stdout, /^Sandcastle Workflow v0\.3\.3/m);
+      assert.match(result.stdout, /^Sandcastle Workflow v0\.3\.4/m);
       assert.match(result.stdout, /^Max iterations: 1$/m);
       assert.doesNotMatch(result.stdout, /=== Iteration /);
       assert.match(result.stdout, /No open ready-for-agent issues found/);
