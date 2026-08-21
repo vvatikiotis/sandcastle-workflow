@@ -289,7 +289,7 @@ function execFile(file: string, args: readonly string[]) {
   });
 }
 
-const packageManager = await resolvePackageManager(projectRoot);
+const packageManager = await resolvePackageManager(projectRoot, packageVersion);
 const verificationPromptArgs = {
   INSTALL_COMMAND: packageManager.commands.install.join(" "),
   TYPECHECK_COMMAND: packageManager.commands.typecheck.join(" "),
@@ -510,7 +510,7 @@ async function validateGitHubRepository(): Promise<void> {
     )
   ) {
     throw new Error(
-      `Sandcastle version 0.3.7 supports only GitHub.com origin remotes. Found: ${remoteUrl || "none"}.`,
+      `Sandcastle version ${packageVersion} supports only GitHub.com origin remotes. Found: ${remoteUrl || "none"}.`,
     );
   }
 
@@ -1369,7 +1369,7 @@ async function getOpenReadyIssues(): Promise<ReadyIssue[]> {
     .parse(JSON.parse(stdout));
   if (readyIssues.length > 100) {
     throw new InvalidIssueGraphError(
-      "Sandcastle found more than 100 open ready-for-agent issues. Reduce the eligible set to the documented version 0.3.7 limit before running the workflow.",
+      `Sandcastle found more than 100 open ready-for-agent issues. Reduce the eligible set to the documented version ${packageVersion} limit before running the workflow.`,
     );
   }
   return readyIssues;

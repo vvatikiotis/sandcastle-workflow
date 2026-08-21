@@ -24,7 +24,10 @@ import { after, before, describe, it } from "node:test";
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageName = "@vvatikiotis/sandcastle-workflow";
-const packageVersion = "0.3.7";
+const packageManifest = JSON.parse(
+  await readFile(path.join(packageRoot, "package.json"), "utf8")
+);
+const packageVersion = packageManifest.version;
 const validRunnerConfig = [
   "IMPLEMENTER_MODEL=test-model",
   "IMPLEMENTER_EFFORT=low",
@@ -600,7 +603,9 @@ describe("packed CLI", () => {
       },
     });
 
-    assert.match(result.stdout, /Docker image: sandcastle:pnpm-docker-v0\.3\.7/);
+    assert.ok(
+      result.stdout.includes(`Docker image: sandcastle:pnpm-docker-v${packageVersion}`)
+    );
     assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
     assert.match(
       result.stdout,
@@ -609,7 +614,10 @@ describe("packed CLI", () => {
     const dockerArguments = (await readFile(capturePath, "utf8")).trim().split("\n");
     const fileIndex = dockerArguments.indexOf("--file");
     const tagIndex = dockerArguments.indexOf("--tag");
-    assert.equal(dockerArguments[tagIndex + 1], "sandcastle:pnpm-docker-v0.3.7");
+    assert.equal(
+      dockerArguments[tagIndex + 1],
+      `sandcastle:pnpm-docker-v${packageVersion}`
+    );
     assert.match(dockerArguments[fileIndex + 1], /dist\/defaults\/docker\/Dockerfile$/);
     assert.equal(
       dockerArguments.at(-1),
@@ -726,7 +734,9 @@ describe("packed CLI", () => {
         },
       });
 
-      assert.match(result.stdout, /^Sandcastle Workflow v0\.3\.7/m);
+      assert.ok(
+        result.stdout.includes(`Sandcastle Workflow v${packageVersion}\n`)
+      );
       assert.match(result.stdout, /^Max iterations: 1$/m);
       assert.doesNotMatch(result.stdout, /=== Iteration /);
       assert.match(result.stdout, /No open ready-for-agent issues found/);
@@ -818,13 +828,20 @@ describe("packed CLI", () => {
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     await assert.rejects(runDry(), (error) => {
       assert.match(error.stderr, /Unsupported or malformed consumer packageManager/);
+      assert.ok(
+        error.stderr.includes(
+          `Version ${packageVersion} supports npm 10 and pnpm 11.`
+        )
+      );
       return true;
     });
 
     manifest.packageManager = "pnpm@10.0.0";
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     await assert.rejects(runDry(), (error) => {
-      assert.match(error.stderr, /supports pnpm 11/);
+      assert.ok(
+        error.stderr.includes(`Version ${packageVersion} supports pnpm 11.`)
+      );
       return true;
     });
 
@@ -843,6 +860,36 @@ describe("packed CLI", () => {
       assert.match(error.stderr, /pnpm-lock\.yaml must be a regular file/);
       return true;
     });
+  });
+
+  it("reports the package version for an unsupported origin", async () => {
+    const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+      "pnpm-unsupported-origin"
+    );
+    await run(
+      "git",
+      ["remote", "set-url", "origin", "https://gitlab.com/example/project.git"],
+      { cwd: consumerRoot }
+    );
+
+    await assert.rejects(
+      run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: {
+          ...process.env,
+          PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.ok(
+          error.stderr.includes(
+            `Sandcastle version ${packageVersion} supports only GitHub.com origin remotes.`
+          )
+        );
+        return true;
+      }
+    );
   });
 
   it("fails preflight when required GitHub labels are missing", async () => {
@@ -908,10 +955,9 @@ fi
       }),
       (error) => {
         assert.equal(error.code, 3);
-        assert.match(
-          `${error.stdout}\n${error.stderr}`,
-          /more than 100 open ready-for-agent issues/
-        );
+        const output = `${error.stdout}\n${error.stderr}`;
+        assert.match(output, /more than 100 open ready-for-agent issues/);
+        assert.ok(output.includes(`documented version ${packageVersion} limit`));
         return true;
       }
     );

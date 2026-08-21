@@ -58,7 +58,7 @@ git grep -l --fixed-strings "$OLD_VERSION" -- . \
   ':(exclude)pnpm-lock.yaml'
 ```
 
-Review every result. Update current-release references, but preserve historical release records and unrelated dependency versions. Never edit `dist/` manually; the build regenerates it.
+Review every result. Update current-release references in consumer documentation, but preserve historical release records and unrelated dependency versions. Source and tests must derive the workflow version from `package.json`; replace any current-version literal found there instead of bumping it. Never edit `dist/` manually; the build regenerates it.
 
 ### 4. Run source and artifact checks
 
