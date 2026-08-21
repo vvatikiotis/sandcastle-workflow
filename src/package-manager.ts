@@ -97,7 +97,8 @@ function requireVerificationScripts(manifest: Record<string, unknown>): void {
 }
 
 export async function resolvePackageManager(
-  projectRoot: string
+  projectRoot: string,
+  workflowVersion: string
 ): Promise<SupportedPackageManager> {
   const manifestPath = path.join(projectRoot, "package.json");
   let manifestText: string;
@@ -154,7 +155,7 @@ export async function resolvePackageManager(
     );
     if (match === null) {
       throw new Error(
-        `Unsupported or malformed consumer packageManager declaration: ${declaration}. Version 0.3.7 supports npm 10 and pnpm 11.`
+        `Unsupported or malformed consumer packageManager declaration: ${declaration}. Version ${workflowVersion} supports npm 10 and pnpm 11.`
       );
     }
     managerName = match[1] === "npm" ? "npm" : "pnpm";
@@ -162,7 +163,7 @@ export async function resolvePackageManager(
     const expectedMajor = supportedManagers[managerName].major;
     if (declaredMajor !== expectedMajor) {
       throw new Error(
-        `Unsupported ${managerName} major ${declaredMajor}. Version 0.3.7 supports ${managerName} ${expectedMajor}.`
+        `Unsupported ${managerName} major ${declaredMajor}. Version ${workflowVersion} supports ${managerName} ${expectedMajor}.`
       );
     }
   }
