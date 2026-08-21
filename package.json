@@ -1,6 +1,6 @@
 {
   "name": "@vvatikiotis/sandcastle-workflow",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Packaged GitHub-native Sandcastle workflow",
   "private": true,
   "license": "UNLICENSED",
