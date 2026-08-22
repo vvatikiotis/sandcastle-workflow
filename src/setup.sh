@@ -33,10 +33,24 @@ consumer_guide=$script_dir/../@vvatikiotis/sandcastle-workflow/CONSUMER.md
 if [ ! -f "$consumer_guide" ]; then
   consumer_guide=$script_dir/../CONSUMER.md
 fi
+
+extract_package_version() {
+  awk -F'"' '/"version"[[:space:]]*:/ { print $4; exit }' "$1" 2>/dev/null || true
+}
+
+extract_document_version() {
+  grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' "$1" | head -n1 || true
+}
+
 consumer_destination=.sandcastle/CONSUMER.md
+installed_version=$(extract_package_version "$script_dir/../package.json")
+existing_consumer_version=$(extract_document_version "$consumer_destination")
 if [ ! -e "$consumer_destination" ] && [ ! -L "$consumer_destination" ]; then
   cp "$consumer_guide" "$consumer_destination"
   printf 'Created %s\n' "$consumer_destination"
+elif [ "$installed_version" != "" ] && [ "$existing_consumer_version" != "" ] && [ "$installed_version" != "$existing_consumer_version" ] && [ ! -L "$consumer_destination" ]; then
+  cp "$consumer_guide" "$consumer_destination"
+  printf 'Updated %s from %s to %s\n' "$consumer_destination" "$existing_consumer_version" "$installed_version"
 else
   printf 'Preserving existing %s\n' "$consumer_destination"
 fi

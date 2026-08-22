@@ -494,6 +494,47 @@ describe("packed CLI", () => {
     );
   });
 
+  it("updates an existing stale .sandcastle/CONSUMER.md during setup", async () => {
+    const consumerRoot = await installConsumer("pnpm-setup-update");
+    await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+    const setup = path.join(
+      consumerRoot,
+      "node_modules",
+      ".bin",
+      "sandcastle-workflow-setup"
+    );
+    const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
+    await mkdir(sandcastleRoot);
+    await writeFile(
+      path.join(sandcastleRoot, "CONSUMER.md"),
+      "# Consumer Guide\\n\\nThese steps install version `0.3.6` in a new pnpm consumer.\\n"
+    );
+
+    const result = await run(
+      "sh",
+      ["-c", "printf 'y\\ny\\n' | \"$1\"", "setup", setup],
+      { cwd: consumerRoot }
+    );
+
+    const updatedGuide = await readFile(
+      path.join(sandcastleRoot, "CONSUMER.md"),
+      "utf8"
+    );
+    assert.match(
+      updatedGuide,
+      /These steps install version `/
+    );
+    assert.match(updatedGuide, new RegExp(`These steps install version \`${packageVersion}\``));
+    assert.equal(updatedGuide.includes("0.3.6"), false);
+    assert.ok(
+      result.stdout.includes(
+        `Updated .sandcastle/CONSUMER.md from 0.3.6 to ${packageVersion}`
+      )
+    );
+    await access(path.join(sandcastleRoot, "sandcastle.env"));
+    await access(path.join(sandcastleRoot, ".env"));
+  });
+
   it("prints npm project commands after guided setup", async () => {
     const consumerRoot = await installConsumer("npm-setup");
     await run("git", ["init", "--quiet"], { cwd: consumerRoot });
