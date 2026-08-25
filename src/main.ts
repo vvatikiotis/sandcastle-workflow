@@ -88,19 +88,32 @@ import {
   resolvePromptFiles,
 } from "./prompt-resolution.ts";
 import { isWithinDirectory } from "./file-resolution.ts";
-import { initializeProject, reportInitialization } from "./initialization.ts";
+import {
+  ejectDockerfile,
+  initializeProject,
+  reportInitialization,
+} from "./initialization.ts";
 import { cleanupVerificationWorktree } from "./verification-worktree-cleanup.ts";
 import { getVerificationWorktreePaths } from "./verification-worktree-paths.ts";
 import { resolveDockerfile, resolveDockerImageName } from "./docker-image.ts";
 import { resolvePackageManager } from "./package-manager.ts";
 import { acquireRunLock, type RunLock } from "./run-lock.ts";
 
-type CliMode = "run" | "init" | "build-image" | "dry-run" | "help" | "version";
+type CliMode =
+  | "run"
+  | "init"
+  | "eject-dockerfile"
+  | "build-image"
+  | "dry-run"
+  | "help"
+  | "version";
 
 const usage = `Usage: sandcastle-workflow [command]
 
 Commands:
   init         Create project-local examples and ignore rules
+  eject-dockerfile
+               Copy the packaged Dockerfile to .sandcastle/Dockerfile
   build-image  Build the configured Docker image
 
 Options:
@@ -119,6 +132,7 @@ function parseCliMode(args: readonly string[]): CliMode | undefined {
 
   switch (args[0]) {
     case "init":
+    case "eject-dockerfile":
     case "build-image":
       return args[0];
     case "--dry-run":
@@ -243,6 +257,21 @@ if (command === "init") {
   runCompletion.setStatus({
     kind: "completed",
     reason: `Initialized project-local Sandcastle configuration at ${projectRoot}.`,
+  });
+  await runCompletion.printSummary();
+  process.exit(0);
+}
+
+if (command === "eject-dockerfile") {
+  const dockerfilePath = projectPath(".sandcastle", "Dockerfile");
+  const outcome = await ejectDockerfile(
+    projectRoot,
+    path.join(workflowRoot, "defaults", "docker", "Dockerfile"),
+  );
+  console.log(`${outcome === "created" ? "Created" : "Preserved"} ${dockerfilePath}`);
+  runCompletion.setStatus({
+    kind: "completed",
+    reason: `${outcome === "created" ? "Created" : "Preserved"} project Dockerfile at ${dockerfilePath}.`,
   });
   await runCompletion.printSummary();
   process.exit(0);

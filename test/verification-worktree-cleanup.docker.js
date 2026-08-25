@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 
 import { cleanupVerificationWorktree } from "../src/verification-worktree-cleanup.ts";
 import { getVerificationWorktreePaths } from "../src/verification-worktree-paths.ts";
+
+const packageRoot = path.resolve(process.cwd());
 
 async function createRepository() {
   const repositoryPath = await mkdtemp(
@@ -29,6 +31,49 @@ async function createRepository() {
     cwd: repositoryPath,
   });
   return repositoryPath;
+}
+
+async function installPackedWorkflow(repositoryPath) {
+  const packRoot = await mkdtemp(
+    path.join(path.dirname(repositoryPath), "docker-workflow-pack-")
+  );
+  try {
+    const packedOutput = execFileSync(
+      "pnpm",
+      ["pack", "--pack-destination", packRoot],
+      { cwd: packageRoot, encoding: "utf8" }
+    );
+    const packedPath = path.resolve(
+      packageRoot,
+      packedOutput.trim().split("\n").at(-1)
+    );
+    const vendorRoot = path.join(repositoryPath, "vendor");
+    await mkdir(vendorRoot);
+    const vendoredPath = path.join(vendorRoot, path.basename(packedPath));
+    await copyFile(packedPath, vendoredPath);
+    await writeFile(
+      path.join(repositoryPath, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "docker-eject-consumer",
+          private: true,
+          packageManager: "pnpm@11.10.0",
+          devDependencies: {
+            "@vvatikiotis/sandcastle-workflow": `file:vendor/${path.basename(packedPath)}`,
+          },
+        },
+        null,
+        2
+      )}\n`
+    );
+    execFileSync("pnpm", ["install", "--ignore-scripts"], {
+      cwd: repositoryPath,
+      stdio: "pipe",
+    });
+    return path.join(repositoryPath, "node_modules", ".bin", "sandcastle-workflow");
+  } finally {
+    await rm(packRoot, { recursive: true, force: true });
+  }
 }
 
 async function createWorktree(repositoryPath, name) {
@@ -66,6 +111,49 @@ function runContainer(repositoryPath, worktreePath, overlayPath, command) {
     { encoding: "utf8" }
   );
 }
+
+test("builds an ejected Dockerfile when Docker is available", async (t) => {
+  const dockerCheck = spawnSync("docker", ["info"], { encoding: "utf8" });
+  if (dockerCheck.status !== 0) {
+    t.skip(`Docker is unavailable: ${dockerCheck.stderr.trim()}`);
+    return;
+  }
+
+  const repositoryPath = await createRepository();
+  const imageName = `sandcastle-ejected-test-${process.pid}-${Date.now()}`;
+  const dockerfilePath = path.join(repositoryPath, ".sandcastle", "Dockerfile");
+
+  try {
+    const workflow = await installPackedWorkflow(repositoryPath);
+    const eject = spawnSync(workflow, ["eject-dockerfile"], {
+      cwd: repositoryPath,
+      encoding: "utf8",
+    });
+    assert.equal(eject.status, 0, eject.stderr);
+    const build = spawnSync(
+      "docker",
+      [
+        "build",
+        "--build-arg",
+        `AGENT_UID=${process.getuid?.() ?? 1000}`,
+        "--build-arg",
+        `AGENT_GID=${process.getgid?.() ?? 1000}`,
+        "--file",
+        dockerfilePath,
+        "--tag",
+        imageName,
+        repositoryPath,
+      ],
+      { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 }
+    );
+    assert.equal(build.status, 0, build.stderr);
+  } finally {
+    spawnSync("docker", ["image", "rm", "--force", imageName], {
+      encoding: "utf8",
+    });
+    await rm(repositoryPath, { recursive: true, force: true });
+  }
+});
 
 test("the merger sees a clean verification worktree through its sandbox path", async (t) => {
   const dockerCheck = spawnSync("docker", ["info"], { encoding: "utf8" });

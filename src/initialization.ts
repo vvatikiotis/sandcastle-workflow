@@ -1,4 +1,4 @@
-import { lstat, mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const ignoreContents = [
@@ -88,6 +88,19 @@ async function createExclusiveFile(
     }
     throw error;
   }
+}
+
+export async function ejectDockerfile(
+  projectRoot: string,
+  builtInDockerfilePath: string
+): Promise<"created" | "preserved"> {
+  const sandcastleRoot = path.join(projectRoot, ".sandcastle");
+  await createSandcastleDirectory(sandcastleRoot);
+  const dockerfileContents = await readFile(builtInDockerfilePath, "utf8");
+  return createExclusiveFile(
+    path.join(sandcastleRoot, "Dockerfile"),
+    dockerfileContents
+  );
 }
 
 export async function initializeProject(
