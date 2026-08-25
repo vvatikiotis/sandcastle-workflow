@@ -194,6 +194,7 @@ Use the configured pnpm scripts:
 ```text
 pnpm sandcastle
 pnpm sandcastle init
+pnpm sandcastle eject-dockerfile
 pnpm sandcastle build-image
 pnpm sandcastle:dry-run
 pnpm sandcastle --help
@@ -314,6 +315,30 @@ Without `DOCKER_IMAGE`, the package derives `sandcastle:<project>-v<package-vers
 The packaged Dockerfile uses its own minimal build context. A contained `.sandcastle/Dockerfile` override takes precedence and uses the Git root as context.
 
 The default Dockerfile installs `@openai/codex@latest`. Rebuilds can install a different release, while Docker caching can retain an older one. The package version therefore does not identify the installed Codex version. Sandcastle does not disable Docker cache, attest image contents, or pin Codex automatically.
+
+### Eject and customize the Dockerfile
+
+Create a Consumer Repository-owned copy of the packaged Dockerfile:
+
+```bash
+pnpm sandcastle eject-dockerfile
+```
+
+With npm, use:
+
+```bash
+npm run sandcastle -- eject-dockerfile
+```
+
+Run the command from the Git root or any nested directory. It creates `.sandcastle/Dockerfile` only when that file is absent and never overwrites an existing override. The copied file includes comments describing the required runtime capabilities and customization boundaries.
+
+The project Dockerfile is a complete replacement, not an extension of the packaged Dockerfile. You may change the base image, installed operating-system packages, tool versions, or add other runtimes. Preserve Node.js 22 or newer, the Consumer Repository's package manager (npm 10 or pnpm 11), the `codex`, `git`, and `gh` commands, agent access to `/home/agent/workspace`, UID/GID build arguments, and a long-running container entrypoint. Rebuild the image after every change:
+
+```bash
+pnpm sandcastle build-image
+```
+
+An npm consumer uses `npm run sandcastle -- build-image`. Updating the workflow package does not replace an existing `.sandcastle/Dockerfile`; review the packaged default manually and merge relevant changes into the Consumer Repository override when needed.
 
 ## State and security
 

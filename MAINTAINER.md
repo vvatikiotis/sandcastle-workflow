@@ -78,7 +78,7 @@ pnpm pack --dry-run
 
 `pnpm test` includes the packed-artifact suite. That suite creates a real tarball, installs it independently in clean npm and pnpm consumers, and tests the installed executable.
 
-The Docker regression checks verification-worktree mount behavior. It reports a skip when Docker is unavailable.
+The Docker regression checks verification-worktree mount behavior and builds the ejected packaged Dockerfile when Docker is available. It reports a skip when Docker is unavailable.
 
 ### 5. Build the release artifact
 

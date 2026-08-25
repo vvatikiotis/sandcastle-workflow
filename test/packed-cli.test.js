@@ -69,6 +69,7 @@ async function installConsumer(manager) {
         scripts: {
           test: "node --test",
           typecheck: "node --check index.js",
+          sandcastle: "sandcastle-workflow",
         },
         devDependencies: {
           [packageName]: `file:vendor/${path.basename(tarballPath)}`,
@@ -416,6 +417,57 @@ describe("packed CLI", () => {
 
       const installedPackageRoot = await realpath(path.dirname(path.dirname(entry)));
       assert.equal(installedPackageRoot.startsWith(packageRoot), false);
+    });
+  }
+
+  for (const manager of ["npm-eject", "pnpm-eject"]) {
+    it(`ejects the default Dockerfile from a nested ${manager.split("-")[0]} consumer`, async () => {
+      const consumerRoot = await installConsumer(manager);
+      await run("git", ["init", "--quiet"], { cwd: consumerRoot });
+      const nestedRoot = path.join(consumerRoot, "nested", "directory");
+      await mkdir(nestedRoot, { recursive: true });
+      const installedRoot = await realpath(
+        path.join(
+          consumerRoot,
+          "node_modules",
+          "@vvatikiotis",
+          "sandcastle-workflow"
+        )
+      );
+      const packagedDockerfile = path.join(
+        installedRoot,
+        "dist",
+        "defaults",
+        "docker",
+        "Dockerfile"
+      );
+      const ejectedDockerfile = path.join(consumerRoot, ".sandcastle", "Dockerfile");
+
+      const managerFamily = manager.startsWith("npm") ? "npm" : "pnpm";
+      const command =
+        managerFamily === "npm"
+          ? ["run", "sandcastle", "--", "eject-dockerfile"]
+          : ["sandcastle", "eject-dockerfile"];
+      const first = await run(managerFamily, command, { cwd: nestedRoot });
+      assert.match(first.stdout, new RegExp(`Created ${ejectedDockerfile}`));
+      assert.equal(
+        await readFile(ejectedDockerfile, "utf8"),
+        await readFile(packagedDockerfile, "utf8")
+      );
+
+      const consumerOverride = `${await readFile(ejectedDockerfile, "utf8")}# Consumer customization\n`;
+      await writeFile(ejectedDockerfile, consumerOverride);
+      const second = await run(managerFamily, command, { cwd: consumerRoot });
+      assert.match(second.stdout, new RegExp(`Preserved ${ejectedDockerfile}`));
+      assert.equal(await readFile(ejectedDockerfile, "utf8"), consumerOverride);
+
+      await rm(ejectedDockerfile);
+      const third = await run(managerFamily, command, { cwd: consumerRoot });
+      assert.match(third.stdout, new RegExp(`Created ${ejectedDockerfile}`));
+      assert.equal(
+        await readFile(ejectedDockerfile, "utf8"),
+        await readFile(packagedDockerfile, "utf8")
+      );
     });
   }
 
