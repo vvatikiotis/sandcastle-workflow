@@ -18,6 +18,13 @@ The package owns executable code and read-only defaults. Consumers own configura
 - GitHub CLI for consumer-boundary fixtures and issue operations
 - Docker for the optional Docker regression
 
+`GH_TOKEN` must contain a GitHub personal access token (PAT) with access to the Consumer Repository and these repository permissions:
+
+- Metadata: read-only
+- Issues: read and write
+
+The workflow does not work without this PAT and these permissions.
+
 ## Release procedure
 
 The command snippets use shell syntax supported by both Bash and Zsh. Run these steps in order. Stop if a required check fails.
