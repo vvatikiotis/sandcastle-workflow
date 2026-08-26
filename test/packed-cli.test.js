@@ -336,6 +336,14 @@ describe("packed CLI", () => {
     ].sort();
     assert.deepEqual(entries.sort(), expectedEntries);
 
+    const { stdout: bundledCli } = await run("tar", [
+      "-xOf",
+      tarballPath,
+      "package/dist/cli.js",
+    ]);
+    assert.match(bundledCli, /^#!\/usr\/bin\/env node\n/);
+    assert.doesNotMatch(bundledCli, /sourceMappingURL=/);
+
     for (const forbidden of [
       "/src/",
       "/test/",
@@ -414,6 +422,7 @@ describe("packed CLI", () => {
         cwd: tempRoot,
       });
       assert.equal(version.stdout.trim(), packageVersion);
+      assert.equal((await stat(entry)).mode & 0o111, 0o111);
 
       const installedPackageRoot = await realpath(path.dirname(path.dirname(entry)));
       assert.equal(installedPackageRoot.startsWith(packageRoot), false);
