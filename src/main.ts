@@ -30,6 +30,7 @@ import {
   lstat,
   mkdir,
   open,
+  appendFile,
   readFile,
   realpath,
   rename,
@@ -1142,6 +1143,38 @@ async function getBranchCommit(branch: string): Promise<string> {
   return commit;
 }
 
+async function getChangedDockerfiles(
+  beforeCommit: string,
+  afterCommit: string,
+): Promise<string[]> {
+  const { stdout } = await execFile("git", [
+    "diff",
+    "--name-only",
+    beforeCommit,
+    afterCommit,
+    "--",
+  ]);
+  return stdout
+    .split("\n")
+    .map((filePath) => filePath.trim())
+    .filter((filePath) => path.basename(filePath) === "Dockerfile");
+}
+
+async function throwIfDockerfileChanged(
+  role: "implementer" | "reviewer",
+  issueId: string | number,
+  changedDockerfiles: readonly string[],
+  logPath: string,
+): Promise<void> {
+  if (changedDockerfiles.length === 0) {
+    return;
+  }
+
+  const message = `ABORTING RUN: ${role} for issue #${issueId} changed Dockerfile(s): ${changedDockerfiles.join(", ")}.`;
+  await appendFile(logPath, `\n\n${"!".repeat(80)}\n${message}\n${"!".repeat(80)}\n`);
+  throw new Error(message);
+}
+
 async function getBranchHeadCommitSubject(branch: string): Promise<string> {
   const { stdout } = await execFile("git", [
     "log",
@@ -1976,6 +2009,17 @@ async function runStandaloneIssue(
           }),
       });
 
+      const branchCommitAfterImplementation = await getBranchCommit(branch);
+      await throwIfDockerfileChanged(
+        "implementer",
+        issue.id,
+        await getChangedDockerfiles(
+          branchCommitBeforeImplementation,
+          branchCommitAfterImplementation,
+        ),
+        logPath,
+      );
+
       if (implement.outcome !== "implemented") {
         const reason = reportPhaseFailure({
           phase: `Standalone implementer for issue #${issue.id}`,
@@ -1986,9 +2030,7 @@ async function runStandaloneIssue(
         return { outcome: "stopped", reason };
       }
 
-      if (
-        (await getBranchCommit(branch)) === branchCommitBeforeImplementation
-      ) {
+      if (branchCommitAfterImplementation === branchCommitBeforeImplementation) {
         throw new Error(
           "Standalone implementer reported success without creating a commit.",
         );
@@ -2033,6 +2075,7 @@ async function runStandaloneIssue(
       );
       announceAgentStart(runName, branch);
 
+      const branchCommitBeforeReview = await getBranchCommit(branch);
       const review = await runAgentPhase<ReviewerOutcome>({
         phase: "Standalone reviewer",
         context: `issue #${issue.id}`,
@@ -2056,6 +2099,17 @@ async function runStandaloneIssue(
             logging: { type: "file", path: reviewLogPath, verbose: true },
           }),
       });
+
+      const branchCommitAfterReview = await getBranchCommit(branch);
+      await throwIfDockerfileChanged(
+        "reviewer",
+        issue.id,
+        await getChangedDockerfiles(
+          branchCommitBeforeReview,
+          branchCommitAfterReview,
+        ),
+        reviewLogPath,
+      );
 
       if (review.outcome !== "approved") {
         const reason = reportPhaseFailure({
@@ -2784,6 +2838,17 @@ if (recoverySucceeded) {
             }),
         });
 
+        const branchCommitAfterImplementation = await getBranchCommit(branch);
+        await throwIfDockerfileChanged(
+          "implementer",
+          plannedIssue.id,
+          await getChangedDockerfiles(
+            branchCommitBeforeImplementation,
+            branchCommitAfterImplementation,
+          ),
+          logPath,
+        );
+
         if (implement.outcome !== "implemented") {
           const reason = reportPhaseFailure({
             phase: `Implementer for issue #${plannedIssue.id}`,
@@ -2795,7 +2860,6 @@ if (recoverySucceeded) {
           break;
         }
 
-        const branchCommitAfterImplementation = await getBranchCommit(branch);
         if (
           branchCommitAfterImplementation === branchCommitBeforeImplementation
         ) {
@@ -2841,6 +2905,7 @@ if (recoverySucceeded) {
         );
         announceAgentStart(runName, branch);
 
+        const branchCommitBeforeReview = await getBranchCommit(branch);
         const review = await runAgentPhase<ReviewerOutcome>({
           phase: "Reviewer",
           context: `issue #${plannedIssue.id}`,
@@ -2863,6 +2928,17 @@ if (recoverySucceeded) {
               logging: { type: "file", path: reviewLogPath, verbose: true },
             }),
         });
+
+        const branchCommitAfterReview = await getBranchCommit(branch);
+        await throwIfDockerfileChanged(
+          "reviewer",
+          plannedIssue.id,
+          await getChangedDockerfiles(
+            branchCommitBeforeReview,
+            branchCommitAfterReview,
+          ),
+          reviewLogPath,
+        );
 
         if (review.outcome !== "approved") {
           const reason = reportPhaseFailure({

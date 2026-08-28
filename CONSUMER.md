@@ -4,7 +4,7 @@ This guide explains how to install and run `@vvatikiotis/sandcastle-workflow` in
 
 ## Quick start
 
-These steps install version `0.5.0` in a new pnpm consumer.
+These steps install version `0.5.1` in a new pnpm consumer.
 
 1. **Create the repository**
 
@@ -23,16 +23,16 @@ These steps install version `0.5.0` in a new pnpm consumer.
 
    ```bash
    mkdir vendor
-   cp /path/artifacts/vvatikiotis-sandcastle-workflow-0.5.0.tgz vendor/
+   cp /path/artifacts/vvatikiotis-sandcastle-workflow-0.5.1.tgz vendor/
    ```
 
    Verify the checksum with the available command:
 
    ```bash
    if command -v sha256sum >/dev/null 2>&1; then
-     sha256sum vendor/vvatikiotis-sandcastle-workflow-0.5.0.tgz
+     sha256sum vendor/vvatikiotis-sandcastle-workflow-0.5.1.tgz
    else
-     shasum -a 256 vendor/vvatikiotis-sandcastle-workflow-0.5.0.tgz
+     shasum -a 256 vendor/vvatikiotis-sandcastle-workflow-0.5.1.tgz
    fi
    ```
 
@@ -41,7 +41,7 @@ These steps install version `0.5.0` in a new pnpm consumer.
 4. **Install the workflow**
 
    ```bash
-   pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.5.0.tgz
+   pnpm add -D ./vendor/vvatikiotis-sandcastle-workflow-0.5.1.tgz
    ```
 
 5. **Add Sandcastle scripts**
@@ -131,7 +131,7 @@ These steps install version `0.5.0` in a new pnpm consumer.
 To update an existing consumer, copy the reviewed artifact into `vendor/`, verify its checksum, and install it as the new file dependency:
 
 ```bash
-VERSION=0.5.0
+VERSION=0.5.1
 cp /path/artifacts/vvatikiotis-sandcastle-workflow-${VERSION}.tgz vendor/
 if command -v sha256sum >/dev/null 2>&1; then
   sha256sum "vendor/vvatikiotis-sandcastle-workflow-${VERSION}.tgz"
@@ -157,7 +157,7 @@ Commit the new tarball, package manifest, and lockfile together. Review project 
 
 ## Supported environment
 
-Version `0.5.0` supports:
+Version `0.5.1` supports:
 
 - Node.js 22 or newer on macOS and Linux
 - npm 10 or pnpm 11 repositories
@@ -173,7 +173,7 @@ The package is private and local-only. Consumers commit a reviewed tarball under
 The quick start uses pnpm. With npm, install the same reviewed artifact as a relative file dependency:
 
 ```bash
-npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.5.0.tgz
+npm install --save-dev ./vendor/vvatikiotis-sandcastle-workflow-0.5.1.tgz
 ```
 
 Use these npm commands in place of the pnpm quick-start commands:
@@ -282,7 +282,7 @@ Before the dry run in quick-start step 10, complete steps 8 and 9. Step 8 makes 
 - one specification is selected per invocation;
 - final review runs only after every direct child closes.
 
-Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.5.0` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
+Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.5.1` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
 
 The package includes the required Agent Skills-standard `github-ticket-relationships` skill. Step 8 configures it project-locally. The symbolic link makes the skill discoverable, and the `AGENTS.md` instruction tells agents when to use it. Both are required consumer setup. Initialization prints the installed source path but does not create the link or modify agent settings.
 
@@ -340,6 +340,8 @@ pnpm sandcastle build-image
 
 An npm consumer uses `npm run sandcastle -- build-image`. Updating the workflow package does not replace an existing `.sandcastle/Dockerfile`; review the packaged default manually and merge relevant changes into the Consumer Repository override when needed.
 
+Implementer and reviewer agents must not change any file named `Dockerfile` in a Consumer Repository. After each of these agent phases finishes, Sandcastle compares the branch commits. If that phase changed a Dockerfile, Sandcastle writes a prominent `ABORTING RUN` banner and the affected paths to that phase's log, then aborts with an error before starting the next phase or merging. A maintainer must inspect the branch and make Dockerfile changes outside an agent run.
+
 ## State and security
 
 Workflow-owned state remains under `.sandcastle`: logs, issue worktrees, dependency overlays, merger recovery state, and the active-run lock. Normal runs enforce owner-only permissions on those directories (`0700`) and on new log, lock, and recovery files (`0600`). These permissions protect against other local users, not agents that receive the project-root mount.
@@ -367,7 +369,7 @@ The installed package is read-only, but agent containers receive writable worktr
 
 ## Upgrade
 
-Version `0.5.0` requires no consumer migration action. The packaged CLI is now minified and mangled without changing its commands or runtime behavior.
+Version `0.5.1` requires no consumer migration action. It aborts before review or merge when an implementer or reviewer changes a Dockerfile, and records a prominent error in that agent's log. Rebuild the configured image only for Dockerfile changes made and reviewed outside an agent run.
 
 Copy the replacement artifact into `vendor/` and verify its checksum. Set `VERSION` to the new version, install the new file dependency, and then remove the old artifact. Qualify the upgrade before a normal run:
 
