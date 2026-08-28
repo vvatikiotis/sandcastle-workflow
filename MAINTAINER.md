@@ -11,6 +11,8 @@ Use this guide to turn a source change into a reviewed, locally vendored package
 
 The package owns executable code and read-only defaults. Consumers own configuration, credentials, project guidance, Dockerfile overrides, logs, worktrees, dependency overlays, locks, and recovery state. Preserve the GitHub-native control plane in [ADR-0001](docs/adr/0001-github-native-sandcastle-control-plane.md).
 
+Implementer and reviewer phases must not modify any Consumer Repository file named `Dockerfile`. The runner enforces this after each agent finishes by comparing the branch commits. A detected change must append a prominent error to that phase's log and abort before the next phase or merge. Maintainers make and review Dockerfile changes outside agent runs, then rebuild the configured image.
+
 ## Prerequisites
 
 - Node.js 22 or newer
@@ -78,7 +80,7 @@ pnpm pack --dry-run
 
 `pnpm test` includes the packed-artifact suite. That suite creates a real tarball, installs it independently in clean npm and pnpm consumers, and tests the installed executable.
 
-The Docker regression checks verification-worktree mount behavior and builds the ejected packaged Dockerfile when Docker is available. It reports a skip when Docker is unavailable.
+The Docker regression checks verification-worktree mount behavior and builds the ejected packaged Dockerfile when Docker is available. It reports a skip when Docker is unavailable. Packed-artifact coverage must also verify consumer-visible workflow safety behavior, including abort status and phase-log diagnostics when an implementer or reviewer changes a Dockerfile.
 
 ### 5. Build the release artifact
 
