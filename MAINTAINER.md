@@ -29,7 +29,29 @@ The workflow does not work without this PAT and these permissions.
 
 ## Release procedure
 
-The command snippets use shell syntax supported by both Bash and Zsh. Run these steps in order. Stop if a required check fails.
+### Automated release
+
+After the implementation, tests, and release notes are reviewed and committed, run the release command from a clean working tree:
+
+```bash
+pnpm release patch
+```
+
+Use `minor` or `major` instead of `patch`, or supply an exact newer version such as `0.6.1`. The command:
+
+1. requires a clean working tree and a version tag that does not already exist;
+2. updates `package.json` and current-version references in `CONSUMER.md`;
+3. runs type checking, all tests, the Docker regression, and the package dry run;
+4. builds the tarball and its SHA-256 checksum under `artifacts/`;
+5. stages the version, consumer guide, artifact, and checksum;
+6. validates and commits the staged release as `release: package vX.Y.Z`; and
+7. creates the local `vX.Y.Z` tag.
+
+It never pushes, publishes to npm, or rewrites an existing tag. If a qualification step fails after files are updated, inspect the failure, then restore or commit the generated changes before retrying because the next invocation again requires a clean working tree.
+
+The command updates every current-version occurrence in `CONSUMER.md`. Keep historical release records in separate files or use wording that does not repeat the current package version, so automated updates do not rewrite history.
+
+The manual steps below describe the same release and remain available for inspection or recovery. The command snippets use shell syntax supported by both Bash and Zsh. Run them in order and stop if a required check fails.
 
 ### 1. Start clean and inspect the change
 
@@ -112,7 +134,7 @@ Confirm that the tarball contains only the compiled output, packaged defaults an
 
 Update release notes or consumer migration instructions for every consumer-facing change. State when no consumer action is required.
 
-Then stage the source change, tests, documentation, generated `dist/`, tarball, and checksum together:
+For a manual release, stage the reviewed release changes, version documentation, tarball, and checksum together. Generated `dist/` remains ignored because `prepack` rebuilds it:
 
 ```bash
 git add -A
