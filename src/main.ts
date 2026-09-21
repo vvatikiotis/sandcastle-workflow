@@ -184,7 +184,7 @@ if (command === "version") {
   process.exit(0);
 }
 
-console.log(`Sandcastle Workflow v${packageVersion}\n`);
+console.log(chalk.blue(`Sandcastle Workflow v${packageVersion}\n`));
 
 //
 // region Run completion reporting
@@ -492,7 +492,11 @@ if (command === "build-image") {
   const gid = process.getgid?.() ?? 1000;
 
   console.log(`Docker image: ${dockerImageName}`);
-  console.log(`Dockerfile: ${dockerfile.path} (${dockerfile.source})`);
+  const dockerfileSource =
+    dockerfile.source === "built-in"
+      ? chalk.blue(dockerfile.source)
+      : dockerfile.source;
+  console.log(`Dockerfile: ${dockerfile.path} (${dockerfileSource})`);
   console.log(`Build context: ${dockerfile.context}`);
   console.log(`Build arguments: AGENT_UID=${uid}, AGENT_GID=${gid}`);
   await execFile("docker", [
@@ -617,10 +621,14 @@ const AGENT_CONFIG = {
 await requireProjectCodingStandards(projectRoot);
 const promptFiles = await resolvePromptFiles({ projectRoot, workflowRoot });
 for (const selection of promptFiles.selections) {
-  console.log(`Prompt ${selection.filename}: built-in ${selection.path}`);
+  console.log(
+    `Prompt ${selection.filename}: ${chalk.blue("built-in")} ${selection.path}`,
+  );
   if (selection.guidancePath !== undefined) {
     console.log(
-      `Project guidance ${selection.filename}: ${selection.guidancePath}`,
+      chalk.blue(
+        `Project guidance ${selection.filename}: ${selection.guidancePath}`,
+      ),
     );
   }
 }
