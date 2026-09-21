@@ -969,8 +969,12 @@ function createRunName(
   return chalk.blue(`${agentType}: ${modelName}, ${reasoningLevel}`);
 }
 
+let announcedAgentCount = 0;
+
 function announceAgentStart(runName: string, branch: string): void {
-  console.log(formatAgentStartMessage(runName, branch, new Date()));
+  const prefix = announcedAgentCount === 0 ? "" : "\n";
+  announcedAgentCount += 1;
+  console.log(`${prefix}${formatAgentStartMessage(runName, branch, new Date())}`);
 }
 
 function formatTimestamp(date = new Date()): string {
@@ -1943,7 +1947,7 @@ async function runStandaloneIssue(
   const baseSnapshot = await getBaseSnapshot();
 
   console.log(`Selected standalone issue #${issue.id}: ${issue.title}`);
-  console.log(`Branch: ${branch}`);
+  console.log(`Branch: ${branch}\n`);
 
   const overlay = await createNodeModulesOverlay({
     rootDirectory: nodeModulesOverlayRoot,
@@ -2388,7 +2392,7 @@ async function runStandaloneIssue(
     );
   }
 
-  console.log("\nStandalone merge complete.");
+  console.log(chalk.green("Standalone merge complete."));
   return { outcome: "merged" };
 }
 
@@ -2746,7 +2750,7 @@ if (recoverySucceeded) {
     const baseSnapshot = await getBaseSnapshot();
 
     console.log(`Selected issue #${plannedIssue.id}: ${plannedIssue.title}`);
-    console.log(`Branch: ${branch}`);
+    console.log(`Branch: ${branch}\n`);
 
     // Create a single sandbox that both the implementer and reviewer share.
     // This gives both agents a real, named branch that persists across phases.
@@ -2868,7 +2872,7 @@ if (recoverySucceeded) {
           );
         }
 
-        console.log(`\nImplementation complete on branch: ${branch}`);
+        console.log(chalk.green(`Implementation complete on branch: ${branch}`));
       }
 
       const reviewEligibilityError = await getSelectedIssueEligibilityError(
@@ -2951,7 +2955,7 @@ if (recoverySucceeded) {
           break;
         }
 
-        console.log("\nReview complete.");
+        console.log(chalk.green("Review complete."));
       }
     } catch (error) {
       sandboxOperationError = error;
@@ -3265,7 +3269,7 @@ if (recoverySucceeded) {
 
     await clearMergerRecoveryMarker();
 
-    console.log("\nMerge complete.");
+    console.log(chalk.green("Merge complete."));
 
     if (iteration === MAX_ITERATIONS) {
       runEndStatus = {
