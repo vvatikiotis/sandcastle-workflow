@@ -28,6 +28,10 @@ const packageManifest = JSON.parse(
   await readFile(path.join(packageRoot, "package.json"), "utf8")
 );
 const packageVersion = packageManifest.version;
+const ansi = {
+  blue: "\u001b[34m",
+  resetForeground: "\u001b[39m",
+};
 const validRunnerConfig = [
   "IMPLEMENTER_MODEL=test-model",
   "IMPLEMENTER_EFFORT=low",
@@ -701,6 +705,7 @@ describe("packed CLI", () => {
       env: {
         ...process.env,
         DOCKER_CAPTURE: capturePath,
+        FORCE_COLOR: "1",
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
       },
     });
@@ -708,7 +713,12 @@ describe("packed CLI", () => {
     assert.ok(
       result.stdout.includes(`Docker image: sandcastle:pnpm-docker-v${packageVersion}`)
     );
-    assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile \(built-in\)/);
+    assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile/);
+    assert.ok(
+      result.stdout.includes(
+        `(${ansi.blue}built-in${ansi.resetForeground})`
+      )
+    );
     assert.match(
       result.stdout,
       /Build arguments: AGENT_UID=\d+, AGENT_GID=\d+/
@@ -1104,14 +1114,14 @@ fi
     );
   });
 
-  it("accepts phase-specific project guidance without replacing the built-in prompt", async () => {
+  it("colors startup and built-in and project-guidance status text blue", async () => {
     const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
       "pnpm-prompt-guidance"
     );
     const guidancePath = path.join(
       consumerRoot,
       ".sandcastle",
-      "standalone-implement-prompt.md"
+      "final-spec-prompt.md"
     );
     await writeFile(guidancePath, "Run the project-specific acceptance check.\n");
 
@@ -1119,17 +1129,25 @@ fi
       cwd: consumerRoot,
       env: {
         ...process.env,
+        FORCE_COLOR: "1",
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
       },
     });
 
-    assert.match(
-      result.stdout,
-      /Prompt standalone-implement-prompt\.md: built-in .*dist\/defaults\/prompts\/standalone-implement-prompt\.md/
+    assert.ok(
+      result.stdout.startsWith(
+        `${ansi.blue}Sandcastle Workflow v${packageVersion}${ansi.resetForeground}\n`
+      )
     );
-    assert.match(
-      result.stdout,
-      /Project guidance standalone-implement-prompt\.md: .*\.sandcastle\/standalone-implement-prompt\.md/
+    assert.ok(
+      result.stdout.includes(
+        `Prompt final-spec-prompt.md: ${ansi.blue}built-in${ansi.resetForeground} `
+      )
+    );
+    assert.ok(
+      result.stdout.includes(
+        `${ansi.blue}Project guidance final-spec-prompt.md: ${guidancePath}${ansi.resetForeground}`
+      )
     );
   });
 
