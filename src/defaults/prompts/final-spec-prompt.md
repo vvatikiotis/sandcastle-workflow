@@ -24,7 +24,7 @@ Replace `<short message>` with a concise description. Comments about gaps, triag
 
 3. **Review spec conformance:** map every specification requirement to completed child work and the integrated result. Identify missing, partial, incorrect, or contradictory behavior. Complete this axis when every specification requirement is accounted for by evidence from the children and repository.
 
-4. **Review domain consistency:** compare the integrated result with the specification's terminology, concepts, ownership boundaries, and `CONTEXT.md` when present. Record only mismatches that materially change the specified domain behavior or boundary.
+4. **Review domain consistency:** compare the integrated result with the specification's terminology, concepts, ownership boundaries, and `GLOSSARY.md` when present. Record only mismatches that materially change the specified domain behavior or boundary.
 
 5. **Review completion-critical standards:** read the root `CODING_STANDARDS.md` and applicable `AGENTS.md`. Record a standards finding only when repository evidence shows a documented violation that materially undermines specification completion.
 

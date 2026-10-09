@@ -20,7 +20,7 @@ Replace `<short message>` with a concise description. Comments about blockers, f
    git log {{BASE_COMMIT}}..{{BRANCH}} --oneline
    ```
 
-   Read the relevant source, tests, `CONTEXT.md` when present, and every applicable ADR. Account for each acceptance criterion and ADR constraint.
+   Read the relevant source, tests, `GLOSSARY.md` when present, and every applicable ADR. Account for each acceptance criterion and ADR constraint.
 3. **Load standards:** read the root `CODING_STANDARDS.md` and every applicable `AGENTS.md`. Treat these files, not generic style preferences, as the standards source.
 4. **Review spec conformance:** map every changed behavior to the issue. Identify missing, partial, incorrect, or out-of-scope behavior; uncovered changed behavior; unchecked assumptions; unsafe casts; credential exposure; injection paths; and other demonstrated security defects. Complete this axis when every acceptance criterion and changed public behavior is accounted for.
 5. **Review standards and design:** inspect each changed area for documented-standard violations and demonstrated maintainability defects. Preserve useful abstractions and separation of concerns; propose a correction only when the diff supplies evidence for it. Complete this axis when every changed area has been checked against the applicable documented rules.

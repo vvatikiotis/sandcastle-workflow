@@ -13,7 +13,7 @@ Replace `<short message>` with a concise description. Comments about blockers, f
 ## Workflow
 
 1. **Guard against graph races:** run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. Continue only when the issue has no parent and no open blocker. If either condition changed, comment with the parent or blocker issue IDs, keep labels and code unchanged, and use the `stopped` outcome.
-2. **Orient:** read issue `{{ISSUE_ID}}`, the relevant source and tests, `CONTEXT.md` when present, and every applicable ADR. Account for each acceptance criterion, existing public behavior, external-system boundary, and ADR constraint.
+2. **Orient:** read issue `{{ISSUE_ID}}`, the relevant source and tests, `GLOSSARY.md` when present, and every applicable ADR. Account for each acceptance criterion, existing public behavior, external-system boundary, and ADR constraint.
 3. **Plan:** state assumptions, the intended implementation seam, and concrete verification criteria. Complete this step when every acceptance criterion maps to an implementation area and verification method.
 4. **Execute:** implement only the standalone issue requirements. When the behavior has a practical, stable seam, work in vertical slices: add one failing behavior-level test, implement only enough to pass it, and repeat. Refactor only while tests are green.
 5. **Verify:** before committing, run `{{TYPECHECK_COMMAND}}` and `{{TEST_COMMAND}}`; both must pass. When documentation, configuration, migration, or another change has no meaningful behavior-level test, explain why in the completion comment and run the strongest relevant checks.

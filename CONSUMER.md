@@ -258,7 +258,7 @@ The Git root must contain:
 - a GitHub CLI release that supports the native `parent`, `blockedBy`, and `blocking` issue fields; update the CLI if relationship preflight reports an unsupported field
 - labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`
 
-`CONTEXT.md` and project ADRs are optional. Prompts use them only when present.
+`GLOSSARY.md` and project ADRs are optional. Prompts use them only when present.
 
 A declared `packageManager` must identify npm 10 or pnpm 11 and match its lockfile. Without a declaration, `package-lock.json` selects npm and `pnpm-lock.yaml` selects pnpm. Both lockfiles, missing lockfiles, npm shrinkwrap, unsupported managers, unsupported majors, and malformed declarations fail preflight.
 

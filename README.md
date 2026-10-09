@@ -8,5 +8,5 @@ Consumers install a reviewed local npm tarball. The package is not published to 
 
 - **Installing, configuring, or running in another repository:** read the [Consumer guide](CONSUMER.md).
 - **Developing, testing, packaging, or releasing this repository:** read the [Maintainer guide](MAINTAINER.md).
-- **Using project terminology or deciding ownership boundaries:** read the [Domain context](CONTEXT.md).
+- **Using project terminology or deciding ownership boundaries:** read the [Domain context](GLOSSARY.md).
 - **Changing behavior governed by a binding design decision:** read the [architectural decision index](docs/adr/README.md) and each applicable record first.
