@@ -4,3 +4,8 @@ dist/
 !artifacts/*.tgz
 graphify-out/
 .DS_Store
+/docs/agents/
+/.agents/
+/AGENTS.md
+/GLOSSARY.md
+/CODING_STANDARDS.md
