@@ -7,17 +7,3 @@ export function isReviewerCommitMessageForIssue(
 
   return trimmedSubject.startsWith(expectedPrefix);
 }
-
-export function shouldJumpToMergerAfterReuseForSpec(
-  commitSubject: string,
-  issueId: string
-): boolean {
-  return isReviewerCommitMessageForIssue(commitSubject, issueId);
-}
-
-export function shouldJumpToMergerAfterReuseForStandalone(
-  commitSubject: string,
-  issueId: string
-): boolean {
-  return isReviewerCommitMessageForIssue(commitSubject, issueId);
-}

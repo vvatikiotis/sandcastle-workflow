@@ -1,4 +1,4 @@
-import chalk from "chalk";
+import chalk, { type ChalkInstance } from "chalk";
 import { inspect } from "node:util";
 
 export type RunEndStatus = {
@@ -6,7 +6,9 @@ export type RunEndStatus = {
   reason: string;
 };
 
-type Signal = "SIGHUP" | "SIGINT" | "SIGTERM";
+const signals = ["SIGHUP", "SIGINT", "SIGTERM"] as const;
+
+type Signal = (typeof signals)[number];
 
 const signalExitCodes: Record<Signal, number> = {
   SIGHUP: 129,
@@ -21,13 +23,14 @@ export function formatDiagnostic(value: unknown): string {
   return typeof value === "string" ? value : inspect(value);
 }
 
+const summaryColors: Record<RunEndStatus["kind"], ChalkInstance> = {
+  completed: chalk.green,
+  stopped: chalk.yellow,
+  aborted: chalk.red,
+};
+
 function formatSummary(status: RunEndStatus): string {
-  const color =
-    status.kind === "completed"
-      ? chalk.green
-      : status.kind === "stopped"
-        ? chalk.yellow
-        : chalk.red;
+  const color = summaryColors[status.kind];
   const divider = "=".repeat(72);
   const successful = status.kind === "completed" ? "yes" : "no";
 
@@ -148,7 +151,7 @@ export function createRunCompletionReporter(
         reason
       );
     });
-    for (const signal of Object.keys(signalExitCodes) as Signal[]) {
+    for (const signal of signals) {
       process.once(signal, () => {
         terminate(
           {

@@ -5,11 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  isReviewerCommitMessageForIssue,
-  shouldJumpToMergerAfterReuseForSpec,
-  shouldJumpToMergerAfterReuseForStandalone,
-} from "../src/recovery-routing.ts";
+import { isReviewerCommitMessageForIssue } from "../src/recovery-routing.ts";
 
 describe("Reviewer commit classification", () => {
   it("matches exact Sandcastle reviewer commit format for the same issue", () => {
@@ -83,29 +79,9 @@ async function createBranchWithCommitSubject(subject) {
 }
 
 describe("Rerun dispatch after reused worktree commits", () => {
-  it("routes spec flow directly to merger when latest commit is reviewer for the same issue", () => {
+  it("keeps the reviewer when the latest commit is an implementer commit for the same issue", () => {
     assert.equal(
-      shouldJumpToMergerAfterReuseForSpec(
-        "sandcastle(reviewer): #123: spec review pass",
-        "123"
-      ),
-      true
-    );
-  });
-
-  it("routes standalone flow directly to merger when latest commit is reviewer for the same issue", () => {
-    assert.equal(
-      shouldJumpToMergerAfterReuseForStandalone(
-        "sandcastle(reviewer): #456: standalone review pass",
-        "456"
-      ),
-      true
-    );
-  });
-
-  it("keeps spec flow on reviewer when latest commit is not a matching reviewer commit", () => {
-    assert.equal(
-      shouldJumpToMergerAfterReuseForSpec(
+      isReviewerCommitMessageForIssue(
         "sandcastle(implementer): #123: initial implementation",
         "123"
       ),
@@ -113,25 +89,21 @@ describe("Rerun dispatch after reused worktree commits", () => {
     );
   });
 
-  it("keeps standalone flow on reviewer when latest commit is not a matching reviewer commit", () => {
+  it("keeps the reviewer when the latest commit is not a Sandcastle commit", () => {
     assert.equal(
-      shouldJumpToMergerAfterReuseForStandalone("chore: adjust docs", "456"),
+      isReviewerCommitMessageForIssue("chore: adjust docs", "456"),
       false
     );
   });
 
-  it("routes from the actual reused branch HEAD subject for both paths", async () => {
+  it("routes from the actual reused branch HEAD subject", async () => {
     const fixture = await createBranchWithCommitSubject(
       "sandcastle(reviewer): #789: review correction"
     );
 
     try {
       assert.equal(
-        shouldJumpToMergerAfterReuseForSpec(fixture.subject, "789"),
-        true
-      );
-      assert.equal(
-        shouldJumpToMergerAfterReuseForStandalone(fixture.subject, "789"),
+        isReviewerCommitMessageForIssue(fixture.subject, "789"),
         true
       );
     } finally {

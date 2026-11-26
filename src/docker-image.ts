@@ -2,6 +2,7 @@ import { defaultImageName } from "@ai-hero/sandcastle/sandboxes/docker";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 
+import { getErrorCode } from "./error-code.ts";
 import {
   isWithinDirectory,
   requireReadableRegularFile,
@@ -43,7 +44,7 @@ export async function resolveDockerfile(options: {
   try {
     await lstat(overridePath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+    if (getErrorCode(error) !== "ENOENT") {
       throw new Error("Could not inspect project override.", {
         cause: error,
       });

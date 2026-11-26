@@ -1,12 +1,10 @@
 import { lstat, open, unlink, type FileHandle } from "node:fs/promises";
 
+import { getErrorCode } from "./error-code.ts";
+
 export type RunLock = {
   release: () => Promise<void>;
 };
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
-}
 
 async function closeAfterFailure(
   handle: FileHandle,
@@ -25,7 +23,7 @@ export async function acquireRunLock(lockPath: string): Promise<RunLock> {
   try {
     handle = await open(lockPath, "wx", 0o600);
   } catch (error) {
-    if (hasErrorCode(error, "EEXIST")) {
+    if (getErrorCode(error) === "EEXIST") {
       throw new Error(
         `Another Sandcastle workflow run already owns ${lockPath}. Inspect the recorded process before removing a confirmed-stale lock; never remove a live run's lock.`
       );
