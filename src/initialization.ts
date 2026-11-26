@@ -92,11 +92,11 @@ async function createExclusiveFile(
 
 export async function ejectDockerfile(
   projectRoot: string,
-  builtInDockerfilePath: string
+  packagedDockerfilePath: string
 ): Promise<"created" | "preserved"> {
   const sandcastleRoot = path.join(projectRoot, ".sandcastle");
   await createSandcastleDirectory(sandcastleRoot);
-  const dockerfileContents = await readFile(builtInDockerfilePath, "utf8");
+  const dockerfileContents = await readFile(packagedDockerfilePath, "utf8");
   return createExclusiveFile(
     path.join(sandcastleRoot, "Dockerfile"),
     dockerfileContents

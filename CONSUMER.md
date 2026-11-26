@@ -209,7 +209,7 @@ The underlying executable's help and version options do not require a Git worktr
 | --- | --- |
 | `0` | Completed successfully |
 | `1` | Aborted, failed safety preflight, or unexpected failure |
-| `2` | Invalid command or arguments |
+| `2` | Invalid command or arguments, or a required work-path choice without an interactive terminal |
 | `3` | Stopped safely and requires follow-up |
 | `129`, `130`, `143` | SIGHUP, SIGINT, or SIGTERM |
 
@@ -284,6 +284,7 @@ Before the dry run in quick-start step 10, complete step 9, which prepares the r
 - every child blocks its parent specification;
 - one specification is selected per invocation;
 - final review runs only after every direct child closes;
+- when both ready specification work and eligible standalone issues exist, the run and the dry run ask which work path to follow. Answering needs an interactive terminal; without one, or when input ends before an answer, the run exits with status `2` without starting work;
 - a standalone issue with an open blocker is not selected and waits until every blocker closes. Other unblocked standalone issues still run. When every standalone candidate is blocked, the run stops with status `3` and lists the open blockers, and the dry run reports blocked issues as waiting.
 
 Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.7.0` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
@@ -294,7 +295,7 @@ Humans and other tools can create the same graph with GitHub CLI or the GitHub w
 
 ## Prompts and project guidance
 
-The package always runs its seven built-in prompts. A consumer may add phase-specific guidance by placing one of these fixed filenames directly under `.sandcastle`:
+The package always runs its seven packaged prompts. A consumer may add phase-specific guidance by placing one of these fixed filenames directly under `.sandcastle`:
 
 - `implement-prompt.md`
 - `review-prompt.md`
@@ -308,7 +309,7 @@ Each file supplies only additional project instructions for its matching phase. 
 
 Guidance files must be readable regular files inside the Git worktree. A symbolic link is accepted only when its resolved target remains inside that worktree. Sandcastle does not interpret placeholders or require packaged prompt markers in project guidance.
 
-Consumers that previously copied a complete built-in prompt into `.sandcastle` must replace that copy with only their additional project instructions. Otherwise, the agent receives a redundant full prompt as project guidance.
+Consumers that previously copied a complete packaged prompt into `.sandcastle` must replace that copy with only their additional project instructions. Otherwise, the agent receives a redundant full prompt as project guidance.
 
 ## Docker image
 

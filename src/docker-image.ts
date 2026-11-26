@@ -10,7 +10,7 @@ import {
 export type DockerfileSelection = {
   path: string;
   context: string;
-  source: "built-in" | "project override";
+  source: "packaged" | "project override";
 };
 
 export function resolveDockerImageName(
@@ -44,29 +44,29 @@ export async function resolveDockerfile(options: {
     await lstat(overridePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw new Error("Could not inspect project Dockerfile override.", {
+      throw new Error("Could not inspect project override.", {
         cause: error,
       });
     }
 
-    const builtInPath = await requireReadableRegularFile(
+    const packagedPath = await requireReadableRegularFile(
       path.join(workflowRoot, "defaults", "docker", "Dockerfile"),
-      "Built-in Dockerfile"
+      "Packaged Dockerfile"
     );
     return {
-      path: builtInPath,
-      context: path.dirname(builtInPath),
-      source: "built-in",
+      path: packagedPath,
+      context: path.dirname(packagedPath),
+      source: "packaged",
     };
   }
 
   const resolvedOverridePath = await requireReadableRegularFile(
     overridePath,
-    "Project Dockerfile override"
+    "Project override"
   );
   if (!isWithinDirectory(projectRoot, resolvedOverridePath)) {
     throw new Error(
-      `Project Dockerfile override resolves outside the active Git worktree: ${resolvedOverridePath}.`
+      `Project override resolves outside the active Git worktree: ${resolvedOverridePath}.`
     );
   }
 

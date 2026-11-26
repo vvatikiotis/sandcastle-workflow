@@ -23,7 +23,7 @@ Replace `<short message>` with a concise description. Comments about blockers, f
 - Keep the main checkout on `{{BASE_BRANCH}}`; never check out `{{BRANCH}}` there.
 - Use only the supplied verification worktree. The host runner owns its removal after the sandbox exits and releases its dependency mount. Leave it in place; never run `git worktree remove`, `git worktree prune`, or a forced worktree cleanup.
 - Treat ADRs and `docs/adr/README.md` as owner-authored and read-only. Never create, edit, delete, rename, move, revert, or resolve conflicts in those files.
-- Preserve `{{BRANCH}}` on every non-success path. `main.ts` owns the base-branch fast-forward, issue closure, and branch deletion.
+- Preserve `{{BRANCH}}` on every non-success path. The host runner owns the base-branch fast-forward, issue closure, and branch deletion.
 
 ## Workflow
 
@@ -35,7 +35,7 @@ Replace `<short message>` with a concise description. Comments about blockers, f
 
    Continue only when it passes. If the base moved, comment on issue `{{ISSUE_ID}}` and use the `stopped` outcome. Include likely causes such as a manual commit, cleanup or configuration commit, another Sandcastle process, or an automated update.
 
-2. **Guard against graph races:** run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. Continue only while the parent is `{{SPEC_ISSUE_ID}}` and no blocker is open. Otherwise comment with the changed relationship, stop before rebasing or merging, and use the `stopped` outcome. `main.ts` already validated the graph; this check covers changes after validation.
+2. **Guard against graph races:** run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. Continue only while the parent is `{{SPEC_ISSUE_ID}}` and no blocker is open. Otherwise comment with the changed relationship, stop before rebasing or merging, and use the `stopped` outcome. The host runner already validated the graph; this check covers changes after validation.
 
 3. **Verify the reviewed branch and ADR boundary:**
 
@@ -98,7 +98,7 @@ Apply project guidance only when it is consistent with the packaged instructions
 
 Emit terminal markers only after completing the matching workflow or stop procedure.
 
-- **Merged:** emit `<phase-outcome>merged</phase-outcome>`, then `<promise>COMPLETE</promise>`. Omit `<phase-detail>`. `main.ts` checks your commits, fast-forwards the base branch, closes the issue, and performs branch deletion and worktree cleanup.
+- **Merged:** emit `<phase-outcome>merged</phase-outcome>`, then `<promise>COMPLETE</promise>`. Omit `<phase-detail>`. The host runner checks your commits, fast-forwards the base branch, closes the issue, and performs branch deletion and worktree cleanup.
 - **Needs information:** emit `<phase-outcome>needs-info</phase-outcome>`, then a single-line `<phase-detail>...</phase-detail>`, then `<promise>COMPLETE</promise>`.
 - **Stopped:** emit `<phase-outcome>stopped</phase-outcome>`, then a single-line `<phase-detail>...</phase-detail>`, then `<promise>COMPLETE</promise>`.
 

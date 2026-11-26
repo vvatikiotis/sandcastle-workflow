@@ -378,7 +378,8 @@ const requiredLabels = [
 ];
 
 // A data-driven GitHub CLI boundary. The fixture lists ready issues per
-// `issue list` call, native sub-issues, parents, blockers, and closed issues;
+// `issue list` call, native sub-issues, parents, blockers, blocked issues, and
+// closed issues;
 // `issue close` persists closures beside the fixture.
 async function writeGitHubFixture(ghPath, fixturePath, fixture) {
   await writeFile(fixturePath, JSON.stringify(fixture));
@@ -417,7 +418,7 @@ if (command === "label" && action === "list") {
     print({
       parent: parent ? { number: Number(parent) } : null,
       blockedBy: { nodes: (fixture.blockers?.[target] ?? []).map((id) => ({ number: Number(id) })) },
-      blocking: { nodes: [] },
+      blocking: { nodes: (fixture.blocking?.[target] ?? []).map((id) => ({ number: Number(id) })) },
     });
   }
 } else if (command === "issue" && action === "close") {
@@ -938,7 +939,7 @@ describe("packed CLI", () => {
     assert.match(result.stdout, /Dockerfile: .*dist\/defaults\/docker\/Dockerfile/);
     assert.ok(
       result.stdout.includes(
-        `(${ansi.blue}built-in${ansi.resetForeground})`
+        `(${ansi.blue}packaged${ansi.resetForeground})`
       )
     );
     assert.match(
@@ -1017,7 +1018,7 @@ describe("packed CLI", () => {
       run(shim, ["build-image"], { cwd: consumerRoot }),
       (error) => {
         assert.equal(error.code, 1);
-        assert.match(error.stderr, /Dockerfile override resolves outside/);
+        assert.match(error.stderr, /Project override resolves outside/);
         return true;
       }
     );
@@ -1336,7 +1337,7 @@ fi
     );
   });
 
-  it("colors startup and built-in and project-guidance status text blue", async () => {
+  it("colors startup and packaged and project-guidance status text blue", async () => {
     const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
       "pnpm-prompt-guidance"
     );
@@ -1363,7 +1364,7 @@ fi
     );
     assert.ok(
       result.stdout.includes(
-        `Prompt final-spec-prompt.md: ${ansi.blue}built-in${ansi.resetForeground} `
+        `Prompt final-spec-prompt.md: ${ansi.blue}packaged${ansi.resetForeground} `
       )
     );
     assert.ok(
@@ -2011,6 +2012,162 @@ fi
   });
 
   describe("standalone selection", () => {
+    // One ready Specification with a single child, plus one Standalone Issue,
+    // makes the runner ask the operator which Work Path to follow.
+    const bothWorkPaths = {
+      readyIssueLists: [
+        [
+          { id: "10", title: "Spec 10", createdAt: "2026-01-01T00:00:10Z", parentId: null },
+          { id: "11", title: "Child 11", createdAt: "2026-01-01T00:00:11Z", parentId: "10" },
+          standaloneIssue("42"),
+        ],
+      ],
+      subIssues: {
+        10: [{ number: 11, title: "Child 11", state: "open", labels: [{ name: "ready-for-agent" }] }],
+      },
+      parents: { 11: "10" },
+      blocking: { 11: ["10"] },
+    };
+
+    // Runs a dry run in a pseudo-terminal from `script`, so the CLI sees an
+    // interactive stdin. Each input is typed only after the next work-path
+    // question is printed, because a line typed early is lost. The terminal
+    // merges stdout and stderr. A hard kill turns a missed question into a
+    // failure instead of a hang.
+    async function dryRunInTerminal(manager, inputs) {
+      const { consumerRoot, shim, environment } = await prepareWorkflowConsumer(
+        manager,
+        bothWorkPaths
+      );
+      const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+      const scriptArgs =
+        process.platform === "darwin"
+          ? ["-q", "/dev/null", shim, "--dry-run"]
+          : ["-qec", `${quote(shim)} --dry-run`, "/dev/null"];
+      const question = "[spec/standalone] ";
+      return new Promise((resolve, reject) => {
+        let output = "";
+        let typed = 0;
+        const child = execFile(
+          "script",
+          scriptArgs,
+          { cwd: consumerRoot, env: environment, encoding: "utf8" },
+          (error) => {
+            clearTimeout(killTimer);
+            if (error?.code === "ENOENT") {
+              reject(
+                new Error(
+                  "The interactive work-path tests need the `script` command to provide a pseudo-terminal.",
+                  { cause: error }
+                )
+              );
+              return;
+            }
+            resolve({
+              code: error ? error.code : 0,
+              signal: error ? error.signal : null,
+              output,
+            });
+          }
+        );
+        const killTimer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+        child.stdout.on("data", (chunk) => {
+          output += chunk;
+          const asked = output.split(question).length - 1;
+          while (typed < asked && typed < inputs.length) {
+            child.stdin.write(inputs[typed]);
+            typed += 1;
+          }
+        });
+      });
+    }
+
+    // Runs the CLI with a piped stdin that stays open and never answers, so a
+    // run that waits for a work-path answer is killed and fails instead of
+    // hanging the suite.
+    async function runWithoutTerminal(manager, args) {
+      const prepared = await prepareWorkflowConsumer(manager, bothWorkPaths);
+      const { consumerRoot, shim, environment } = prepared;
+      const result = await new Promise((resolve) => {
+        const child = execFile(
+          shim,
+          args,
+          { cwd: consumerRoot, env: environment, encoding: "utf8" },
+          (error, stdout, stderr) => {
+            clearTimeout(killTimer);
+            resolve({
+              code: error ? error.code : 0,
+              signal: error ? error.signal : null,
+              stdout,
+              stderr,
+            });
+          }
+        );
+        const killTimer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+      });
+      return { ...prepared, result };
+    }
+
+    it("exits with status 2 when a dry run needs a work path choice without a terminal", async () => {
+      const { result } = await runWithoutTerminal("pnpm-work-path-no-tty-dry-run", ["--dry-run"]);
+
+      assert.equal(result.signal, null, "the dry run hung waiting for a work-path answer");
+      assert.equal(result.code, 2);
+      assert.match(result.stderr, /Both ready spec work and standalone issues are available/);
+      assert.match(result.stderr, /choosing a work path needs an interactive terminal/);
+      assert.match(result.stdout, /SANDCASTLE RUN: STOPPED/);
+    });
+
+    it("exits with status 2 before starting agents when a run needs a work path choice without a terminal", async () => {
+      const { result, capturePath, fixturePath } = await runWithoutTerminal(
+        "pnpm-work-path-no-tty-run",
+        []
+      );
+
+      assert.equal(result.signal, null, "the run hung waiting for a work-path answer");
+      assert.equal(result.code, 2);
+      assert.match(result.stderr, /choosing a work path needs an interactive terminal/);
+      assert.deepEqual(await readCapturedPhases(capturePath), []);
+      assert.deepEqual(await readClosedIssues(fixturePath), []);
+    });
+
+    it("asks for the spec or standalone work path and follows the standalone answer", async () => {
+      const result = await dryRunInTerminal("pnpm-work-path-standalone", ["standalone\n"]);
+
+      assert.equal(result.signal, null, "the dry run hung waiting for a work-path answer");
+      assert.equal(result.code, 0);
+      assert.match(result.output, /Follow the spec path or the standalone path\? \[spec\/standalone\]/);
+      assert.match(result.output, /Selected standalone path\. Would implement standalone issue #42 next\./);
+      assert.doesNotMatch(result.output, /orphan/i);
+    });
+
+    it("rejects orphan as a work path answer", async () => {
+      const result = await dryRunInTerminal("pnpm-work-path-orphan", ["orphan\n", "spec\n"]);
+
+      assert.equal(result.signal, null, "the dry run hung waiting for a work-path answer");
+      assert.equal(result.code, 0);
+      assert.match(result.output, /Please enter "spec" or "standalone"\./);
+      assert.doesNotMatch(result.output, /Selected standalone path/);
+    });
+
+    it("exits with status 2 when the terminal closes stdin at the work path question", async () => {
+      const result = await dryRunInTerminal("pnpm-work-path-ctrl-d", ["\x04"]);
+
+      assert.equal(result.signal, null, "the dry run hung after stdin closed");
+      assert.equal(result.code, 2);
+      assert.match(result.output, /choosing a work path needs an interactive terminal/);
+      assert.match(result.output, /SANDCASTLE RUN: STOPPED/);
+    });
+
+    it("aborts with status 130 when Ctrl-C is pressed at the work path question", async () => {
+      const result = await dryRunInTerminal("pnpm-work-path-ctrl-c", ["\x03"]);
+
+      assert.equal(result.signal, null, "the dry run hung after Ctrl-C");
+      assert.equal(result.code, 130);
+      assert.match(result.output, /SANDCASTLE RUN: ABORTED/);
+      assert.match(result.output, /Received SIGINT\./);
+    });
+
     it("stops when a stale standalone selection disappears during replanning", async () => {
       const { consumerRoot, shim, environment, capturePath } =
         await prepareWorkflowConsumer("pnpm-stale-standalone", {

@@ -11,7 +11,7 @@ Sandcastle uses GitHub-native issue relationships and state as its deterministic
 - Sandcastle selects one ready spec per invocation and never switches to another spec during that invocation.
 - Markdown bodies, comments, titles, and agent inference may explain work but do not establish scope, dependency, or scheduling.
 
-`main.ts` must validate machine-checkable GitHub invariants before implementation, review, merge, and final review. It rejects orphan children, cross-spec blockers, dependency cycles, missing child-to-parent completion edges, nested hierarchies, and state/label changes that make the selected work ineligible.
+`main.ts` must validate machine-checkable GitHub invariants before implementation, review, merge, and final review. It rejects orphan children, blockers outside the spec, dependency cycles, missing child-to-parent completion edges, nested hierarchies, and state/label changes that make the selected work ineligible.
 
 Agents receive the selected IDs and read GitHub only for context and narrow race-condition checks. They do not select work, infer relationships, schedule dependencies, or repair the GitHub graph.
 

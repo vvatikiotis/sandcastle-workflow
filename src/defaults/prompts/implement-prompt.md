@@ -14,7 +14,7 @@ Replace `<short message>` with a concise description. Comments about blockers, f
 
 ## Workflow
 
-1. **Guard against graph races:** run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. Continue only while the parent is `{{SPEC_ISSUE_ID}}` and no blocker is open. If either condition changed, comment with the changed parent or blocker issue IDs, keep labels and code unchanged, and stop without committing. `main.ts` already validated the graph; this check covers changes after validation.
+1. **Guard against graph races:** run `gh issue view {{ISSUE_ID}} --json parent,blockedBy`. Continue only while the parent is `{{SPEC_ISSUE_ID}}` and no blocker is open. If either condition changed, comment with the changed parent or blocker issue IDs, keep labels and code unchanged, and stop without committing. The host runner already validated the graph; this check covers changes after validation.
 2. **Orient:** read issue `{{ISSUE_ID}}`, parent specification `{{SPEC_ISSUE_ID}}`, and every linked ADR. Account for each child acceptance criterion, applicable parent requirement, and ADR constraint before exploring implementation options.
 3. **Explore:** read the relevant source and tests before editing. Read the root `CODING_STANDARDS.md` and every applicable `AGENTS.md` when present, and follow them. Identify the public behavior seam, external-system boundaries, existing behavior, and applicable terminology from `GLOSSARY.md`. Complete this step when every acceptance criterion maps to an implementation area and a verification method.
 4. **Plan:** state assumptions, the intended seam, and concrete verification criteria. Keep the plan within the selected issue and choose the smallest safe change.
