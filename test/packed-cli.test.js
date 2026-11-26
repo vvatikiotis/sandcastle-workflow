@@ -179,9 +179,12 @@ async function installFakeSandcastleBoundary(consumerRoot) {
     `import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  mkdirSync,
   readFileSync,
+  rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 
 function capture(value) {
@@ -205,6 +208,60 @@ function addCommit(cwd, branch, message) {
   execFileSync("git", ["update-ref", "refs/heads/" + branch, commit], { cwd });
 }
 
+function addFileCommit(cwd, branch, filePath, contents, message) {
+  const parent = execFileSync("git", ["rev-parse", branch], { cwd, encoding: "utf8" }).trim();
+  const indexPath = cwd + "/.git/fake-agent-index";
+  const gitEnv = { ...process.env, GIT_INDEX_FILE: indexPath };
+  execFileSync("git", ["read-tree", parent], { cwd, env: gitEnv });
+  const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+    cwd,
+    encoding: "utf8",
+    input: contents,
+  }).trim();
+  execFileSync("git", ["update-index", "--add", "--cacheinfo", "100644," + blob + "," + filePath], {
+    cwd,
+    env: gitEnv,
+  });
+  const tree = execFileSync("git", ["write-tree"], { cwd, env: gitEnv, encoding: "utf8" }).trim();
+  rmSync(indexPath, { force: true });
+  const commit = execFileSync("git", ["commit-tree", tree, "-p", parent, "-m", message], {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Fake Agent",
+      GIT_AUTHOR_EMAIL: "agent@example.com",
+      GIT_COMMITTER_NAME: "Fake Agent",
+      GIT_COMMITTER_EMAIL: "agent@example.com",
+    },
+  }).trim();
+  execFileSync("git", ["update-ref", "refs/heads/" + branch, commit], { cwd });
+}
+
+function commitInWorktree(worktree, filePath, contents, message) {
+  const target = worktree + "/" + filePath;
+  mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+  writeFileSync(target, contents);
+  execFileSync("git", ["add", "--", filePath], { cwd: worktree });
+  execFileSync("git", ["commit", "--quiet", "-m", message], {
+    cwd: worktree,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Fake Agent",
+      GIT_AUTHOR_EMAIL: "agent@example.com",
+      GIT_COMMITTER_NAME: "Fake Agent",
+      GIT_COMMITTER_EMAIL: "agent@example.com",
+    },
+  });
+}
+
+function changesFileFor(role) {
+  const change = process.env.FAKE_AGENT_FILE_CHANGE;
+  if (!change) return undefined;
+  const [changeRole, filePath] = change.split(":");
+  return changeRole === role ? filePath : undefined;
+}
+
 export function codex(model, options) {
   return { model, options };
 }
@@ -223,7 +280,12 @@ export async function createSandbox(options) {
         verbose: runOptions.logging.verbose,
       });
       if (runOptions.name.includes("implementer")) {
-        addCommit(options.cwd, options.branch, "sandcastle(implementer): #42: fake implementation");
+        const changedFile = changesFileFor("implementer");
+        if (changedFile) {
+          addFileCommit(options.cwd, options.branch, changedFile, "FROM scratch\\n", "sandcastle(implementer): #42: fake implementation");
+        } else {
+          addCommit(options.cwd, options.branch, "sandcastle(implementer): #42: fake implementation");
+        }
         if (process.env.RECOVERY_SYMLINK_TARGET) {
           symlinkSync(
             process.env.RECOVERY_SYMLINK_TARGET,
@@ -231,6 +293,10 @@ export async function createSandbox(options) {
           );
         }
         return { stdout: "<phase-outcome>implemented</phase-outcome>\\n<promise>COMPLETE</promise>" };
+      }
+      const reviewerFile = changesFileFor("reviewer");
+      if (reviewerFile) {
+        addFileCommit(options.cwd, options.branch, reviewerFile, "FROM scratch\\n", "sandcastle(reviewer): #42: fake refinement");
       }
       return { stdout: "<phase-outcome>approved</phase-outcome>\\n<promise>COMPLETE</promise>" };
     },
@@ -261,8 +327,16 @@ export async function run(options) {
     execFileSync("gh", ["issue", "close", options.promptArgs.SPEC_ISSUE_ID], { cwd: options.cwd });
     return { stdout: "<phase-outcome>closed</phase-outcome>\\n<promise>COMPLETE</promise>" };
   }
-  execFileSync("git", ["merge", "--ff-only", options.promptArgs.BRANCH], { cwd: options.cwd });
-  execFileSync("gh", ["issue", "close", options.promptArgs.ISSUE_ID], { cwd: options.cwd });
+  // The merger rebases, verifies, and commits on the reviewed branch only.
+  // The runner owns the base-branch fast-forward and issue closure.
+  const mergerFile = changesFileFor("merger");
+  if (mergerFile) {
+    const worktree = options.promptArgs.VERIFICATION_WORKTREE_PATH.replace(
+      "/home/agent/workspace",
+      options.cwd
+    );
+    commitInWorktree(worktree, mergerFile, "FROM scratch\\n", "sandcastle(merger): #" + options.promptArgs.ISSUE_ID + ": fake verification fix");
+  }
   return { stdout: "<phase-outcome>merged</phase-outcome>\\n<promise>COMPLETE</promise>" };
 }
 `
@@ -292,6 +366,154 @@ registerHooks({
 `
   );
   return hookPath;
+}
+
+
+const requiredLabels = [
+  "needs-triage",
+  "needs-info",
+  "ready-for-agent",
+  "ready-for-human",
+  "wontfix",
+];
+
+// A data-driven GitHub CLI boundary. The fixture lists ready issues per
+// `issue list` call, native sub-issues, parents, blockers, and closed issues;
+// `issue close` persists closures beside the fixture.
+async function writeGitHubFixture(ghPath, fixturePath, fixture) {
+  await writeFile(fixturePath, JSON.stringify(fixture));
+  await writeFile(
+    ghPath,
+    `#!/usr/bin/env node
+const { existsSync, readFileSync, writeFileSync } = require("node:fs");
+const fixture = JSON.parse(readFileSync(${JSON.stringify(fixturePath)}, "utf8"));
+const statePath = ${JSON.stringify(`${fixturePath}.state`)};
+const state = existsSync(statePath)
+  ? JSON.parse(readFileSync(statePath, "utf8"))
+  : { closed: [], listCalls: 0 };
+const save = () => writeFileSync(statePath, JSON.stringify(state));
+const print = (value) =>
+  process.stdout.write((typeof value === "string" ? value : JSON.stringify(value)) + "\\n");
+const isClosed = (id) =>
+  state.closed.includes(String(id)) || (fixture.closed ?? []).includes(String(id));
+const [command, action, target] = process.argv.slice(2);
+const args = process.argv.slice(2);
+if (command === "label" && action === "list") {
+  print(${JSON.stringify(requiredLabels.map((name) => ({ name })))});
+} else if (command === "issue" && action === "list") {
+  state.listCalls += 1;
+  save();
+  const lists = fixture.readyIssueLists;
+  const list = lists[Math.min(state.listCalls, lists.length) - 1];
+  print(list.filter((issue) => !isClosed(issue.id)));
+} else if (command === "api") {
+  const match = /issues\\/(\\d+)\\/sub_issues/.exec(action);
+  print((match && fixture.subIssues?.[match[1]]) ?? []);
+} else if (command === "issue" && action === "view") {
+  if (args.includes("state")) {
+    print(isClosed(target) ? "CLOSED" : "OPEN");
+  } else {
+    const parent = fixture.parents?.[target];
+    print({
+      parent: parent ? { number: Number(parent) } : null,
+      blockedBy: { nodes: (fixture.blockers?.[target] ?? []).map((id) => ({ number: Number(id) })) },
+      blocking: { nodes: [] },
+    });
+  }
+} else if (command === "issue" && action === "close") {
+  state.closed.push(String(target));
+  save();
+} else if (command === "issue" && (action === "comment" || action === "edit")) {
+  // Accepted without changing fixture state.
+} else {
+  process.stderr.write("unexpected gh arguments: " + args.join(" ") + "\\n");
+  process.exit(1);
+}
+`
+  );
+  await chmod(ghPath, 0o755);
+}
+
+function standaloneIssue(id, title = `Standalone ${id}`) {
+  return { id, title, createdAt: `2026-01-01T00:00:${id.padStart(2, "0").slice(-2)}Z`, parentId: null };
+}
+
+// Prepares a consumer that can launch fake agents: credentials, an available
+// Docker image, the fake Sandcastle SDK boundary, and a GitHub fixture.
+async function prepareWorkflowConsumer(manager, fixture) {
+  const prepared = await prepareDryRunConsumer(manager);
+  const { consumerRoot, binRoot, ghPath } = prepared;
+  await writeFile(
+    path.join(consumerRoot, ".sandcastle", ".env"),
+    "GH_TOKEN=test-token\n"
+  );
+  const dockerPath = path.join(binRoot, "docker");
+  await writeFile(
+    dockerPath,
+    '#!/bin/sh\nif [ "$1 $2" = "image inspect" ]; then exit 0; fi\nexit 1\n'
+  );
+  await chmod(dockerPath, 0o755);
+  const fixturePath = path.join(consumerRoot, "gh-fixture.json");
+  await writeGitHubFixture(ghPath, fixturePath, fixture);
+  const hookPath = await installFakeSandcastleBoundary(consumerRoot);
+  const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
+  const environment = {
+    ...process.env,
+    FAKE_SANDCASTLE_CAPTURE: capturePath,
+    NODE_OPTIONS: `--import=${hookPath}`,
+    PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+  };
+  return { ...prepared, environment, capturePath, fixturePath };
+}
+
+async function readClosedIssues(fixturePath) {
+  try {
+    return JSON.parse(await readFile(`${fixturePath}.state`, "utf8")).closed;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function readCapturedPhases(capturePath) {
+  try {
+    return (await readFile(capturePath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.type === "phase")
+      .map((entry) => entry.name.split(":")[0]);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function readLogs(consumerRoot) {
+  const logRoot = path.join(consumerRoot, ".sandcastle", "logs");
+  const names = await readdir(logRoot);
+  return Promise.all(
+    names.map(async (name) => ({
+      name,
+      contents: await readFile(path.join(logRoot, name), "utf8"),
+    }))
+  );
+}
+
+async function runExpectingFailure(shim, args, options) {
+  try {
+    const result = await run(shim, args, options);
+    assert.fail(`expected a non-zero exit; stdout:\n${result.stdout}`);
+  } catch (error) {
+    if (error instanceof assert.AssertionError) {
+      throw error;
+    }
+    return error;
+  }
 }
 
 describe("packed CLI", () => {
@@ -1598,5 +1820,395 @@ fi
         return true;
       }
     );
+  });
+
+  describe("preflight validation", () => {
+    it("validates runner configuration strictly before planning", async () => {
+      const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+        "pnpm-runner-config"
+      );
+      const configPath = path.join(consumerRoot, ".sandcastle", "sandcastle.env");
+      const environment = {
+        ...process.env,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      };
+      const validConfig = `${validRunnerConfig}\n`;
+      const cases = [
+        {
+          contents: validConfig.replace(
+            "IMPLEMENTER_MODEL=test-model",
+            "IMPLEMENTER_MODEL"
+          ),
+          diagnostic: /expected a KEY=value assignment/,
+        },
+        {
+          contents: `${validConfig}IMPLEMENTER_MODEL=duplicate\n`,
+          diagnostic: /duplicate configuration key IMPLEMENTER_MODEL/,
+        },
+        {
+          contents: `${validConfig}UNKNOWN_SETTING=value\n`,
+          diagnostic: /unknown configuration key UNKNOWN_SETTING/,
+        },
+        {
+          contents: validConfig.replace(
+            "IMPLEMENTER_EFFORT=low",
+            "IMPLEMENTER_EFFORT="
+          ),
+          diagnostic: /IMPLEMENTER_EFFORT must not be empty/,
+        },
+        {
+          contents: validConfig.replace("MERGER_MODEL=test-model\n", ""),
+          diagnostic: /missing required configuration: MERGER_MODEL/,
+        },
+      ];
+
+      for (const { contents, diagnostic } of cases) {
+        await writeFile(configPath, contents);
+        const error = await runExpectingFailure(shim, ["--dry-run"], {
+          cwd: consumerRoot,
+          env: environment,
+        });
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, diagnostic);
+        assert.doesNotMatch(error.stdout, /=== Sandcastle dry run ===/);
+      }
+
+      await rm(configPath);
+      const missing = await runExpectingFailure(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+      assert.equal(missing.code, 1);
+      assert.match(missing.stderr, /sandcastle\.env is required/);
+    });
+
+    it("requires usable agent credentials only for runs that launch agents and never prints them", async () => {
+      const { consumerRoot, shim, environment } = await prepareWorkflowConsumer(
+        "pnpm-agent-credentials",
+        { readyIssueLists: [[]] }
+      );
+      const agentEnvironmentPath = path.join(consumerRoot, ".sandcastle", ".env");
+      const secrets = /file-secret|host-secret|first-secret|second-secret/;
+      const hostEnvironment = { ...environment };
+      delete hostEnvironment.GH_TOKEN;
+
+      await rm(agentEnvironmentPath);
+      const dryRun = await run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: hostEnvironment,
+      });
+      assert.match(dryRun.stdout, /SANDCASTLE RUN: COMPLETED/);
+      const missing = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: hostEnvironment,
+      });
+      assert.equal(missing.code, 1);
+      assert.match(missing.stderr, /\.sandcastle\/\.env is required before launching agents/);
+
+      const rejected = [
+        { contents: "GH_TOKEN\n", diagnostic: /expected a KEY=value assignment/ },
+        {
+          contents: "GH_TOKEN=first-secret\nGH_TOKEN=second-secret\n",
+          diagnostic: /duplicate environment key GH_TOKEN/,
+        },
+        { contents: "# No credential declared.\n", diagnostic: /must declare GH_TOKEN/ },
+        { contents: "GH_TOKEN=\n", diagnostic: /no usable credential was provided/ },
+        { contents: 'GH_TOKEN="   "\n', diagnostic: /no usable credential was provided/ },
+      ];
+      for (const { contents, diagnostic } of rejected) {
+        await writeFile(agentEnvironmentPath, contents);
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: hostEnvironment,
+        });
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, diagnostic);
+        assert.doesNotMatch(`${error.stdout}\n${error.stderr}`, secrets);
+      }
+
+      await writeFile(agentEnvironmentPath, "GH_TOKEN=file-secret\n");
+      const fromFile = await run(shim, [], {
+        cwd: consumerRoot,
+        env: hostEnvironment,
+      });
+      await writeFile(agentEnvironmentPath, "GH_TOKEN=\n");
+      const fromHost = await run(shim, [], {
+        cwd: consumerRoot,
+        env: { ...hostEnvironment, GH_TOKEN: "host-secret" },
+      });
+      for (const result of [fromFile, fromHost]) {
+        assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+        assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, secrets);
+      }
+    });
+
+    it("requires effective Git ignore protection for runtime state and trackable workflow files", async () => {
+      const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+        "pnpm-ignore-protection"
+      );
+      const environment = {
+        ...process.env,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      };
+      const dryRun = () =>
+        run(shim, ["--dry-run"], { cwd: consumerRoot, env: environment });
+      const dryRunFailure = () =>
+        runExpectingFailure(shim, ["--dry-run"], {
+          cwd: consumerRoot,
+          env: environment,
+        });
+      const sandcastleIgnorePath = path.join(consumerRoot, ".sandcastle", ".gitignore");
+      const rootIgnorePath = path.join(consumerRoot, ".gitignore");
+      const initializedIgnore = await readFile(sandcastleIgnorePath, "utf8");
+      const runtimePaths = [
+        ".sandcastle/.env",
+        ".sandcastle/sandcastle.env",
+        ".sandcastle/logs/",
+        ".sandcastle/worktrees/",
+        ".sandcastle/node-modules-overlays/",
+        ".sandcastle/merger-recovery.json",
+        ".sandcastle/run.lock",
+      ];
+
+      await writeFile(
+        sandcastleIgnorePath,
+        initializedIgnore.replace(/^worktrees\/\n/m, "")
+      );
+      const unprotected = await dryRunFailure();
+      assert.equal(unprotected.code, 1);
+      assert.match(
+        unprotected.stderr,
+        /Git ignore protection is required for \.sandcastle\/worktrees\//
+      );
+
+      await writeFile(sandcastleIgnorePath, initializedIgnore);
+      await writeFile(rootIgnorePath, "node_modules/\n.sandcastle/implement-prompt.md\n");
+      const hidden = await dryRunFailure();
+      assert.equal(hidden.code, 1);
+      assert.match(
+        hidden.stderr,
+        /Workflow file \.sandcastle\/implement-prompt\.md must remain trackable/
+      );
+
+      await writeFile(sandcastleIgnorePath, "# Rules live in the root ignore file.\n");
+      await writeFile(rootIgnorePath, ["node_modules/", ...runtimePaths, ""].join("\n"));
+      // Planning refuses a dirty base checkout, so commit the accepted rules.
+      await run("git", ["commit", "--quiet", "-am", "move ignore rules"], { cwd: consumerRoot });
+      const otherSource = await dryRun();
+      assert.match(otherSource.stdout, /SANDCASTLE RUN: COMPLETED/);
+
+      await writeFile(sandcastleIgnorePath, initializedIgnore);
+      await writeFile(rootIgnorePath, "node_modules/\n");
+      await writeFile(path.join(consumerRoot, ".sandcastle", ".env"), "GH_TOKEN=\n");
+      await run("git", ["add", "--force", ".sandcastle/.env"], { cwd: consumerRoot });
+      const tracked = await dryRunFailure();
+      assert.equal(tracked.code, 1);
+      assert.match(
+        tracked.stderr,
+        /Git ignore rules cannot protect tracked Sandcastle paths: \.sandcastle\/\.env/
+      );
+    });
+  });
+
+  describe("standalone selection", () => {
+    it("stops when a stale standalone selection disappears during replanning", async () => {
+      const { consumerRoot, shim, environment, capturePath } =
+        await prepareWorkflowConsumer("pnpm-stale-standalone", {
+          readyIssueLists: [[standaloneIssue("42")], []],
+        });
+      // One iteration is spent on the stale selection; replanning needs a second.
+      await writeFile(
+        path.join(consumerRoot, ".sandcastle", "sandcastle.env"),
+        `${validRunnerConfig.replace("MAX_ITERATIONS=1", "MAX_ITERATIONS=2")}\n`
+      );
+
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+
+      assert.equal(error.code, 3);
+      assert.match(error.stdout, /SANDCASTLE RUN: STOPPED/);
+      assert.match(error.stdout, /stale selections were replanned/);
+      assert.deepEqual(await readCapturedPhases(capturePath), []);
+    });
+
+    it("shows a blocked standalone issue as waiting and plans the next unblocked one", async () => {
+      const { consumerRoot, shim, environment } = await prepareWorkflowConsumer(
+        "pnpm-blocked-dry-run",
+        {
+          readyIssueLists: [[standaloneIssue("42"), standaloneIssue("43")]],
+          blockers: { 42: ["7"] },
+        }
+      );
+
+      const result = await run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+
+      assert.match(result.stdout, /#42\b.*waiting.*#7\b/);
+      assert.match(result.stdout, /Would implement standalone issue #43 next/);
+    });
+
+    it("skips a blocked standalone issue and implements the next unblocked one", async () => {
+      const { consumerRoot, shim, environment, capturePath, fixturePath } =
+        await prepareWorkflowConsumer("pnpm-blocked-skip", {
+          readyIssueLists: [[standaloneIssue("42"), standaloneIssue("43")]],
+          blockers: { 42: ["7"] },
+        });
+
+      // MAX_ITERATIONS=1 ends the run after #43, so only its output matters.
+      const result = await run(shim, [], {
+        cwd: consumerRoot,
+        env: environment,
+      }).catch((error) => error);
+
+      assert.match(result.stdout, /Selected standalone issue #43/);
+      assert.doesNotMatch(result.stdout, /Selected standalone issue #42/);
+      // A blocked issue is never selected, so it cannot become a stale selection.
+      assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /stale/i);
+      assert.deepEqual(await readClosedIssues(fixturePath), ["43"]);
+      assert.deepEqual(await readCapturedPhases(capturePath), [
+        "standalone-implementer",
+        "standalone-reviewer",
+        "standalone-merger",
+      ]);
+    });
+
+    it("stops with status 3 and lists open blockers when every standalone issue is blocked", async () => {
+      const { consumerRoot, shim, environment, capturePath, fixturePath } =
+        await prepareWorkflowConsumer("pnpm-blocked-all", {
+          readyIssueLists: [[standaloneIssue("42")]],
+          blockers: { 42: ["7", "8"] },
+          closed: ["8"],
+        });
+
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+
+      assert.equal(error.code, 3);
+      assert.match(error.stdout, /SANDCASTLE RUN: STOPPED/);
+      assert.match(`${error.stdout}\n${error.stderr}`, /#42\b.*#7\b/);
+      assert.doesNotMatch(`${error.stdout}\n${error.stderr}`, /#8\b/);
+      assert.doesNotMatch(`${error.stdout}\n${error.stderr}`, /stale/i);
+      assert.deepEqual(await readCapturedPhases(capturePath), []);
+      assert.deepEqual(await readClosedIssues(fixturePath), []);
+    });
+  });
+
+  describe("optional consumer guidance", () => {
+    it("reports missing coding standards and agent instructions without stopping", async () => {
+      const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+        "pnpm-optional-guidance"
+      );
+      const environment = {
+        ...process.env,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      };
+      // Planning refuses a dirty base checkout, so commit each guidance change.
+      await run("git", ["rm", "--quiet", "CODING_STANDARDS.md"], { cwd: consumerRoot });
+      await run("git", ["commit", "--quiet", "-m", "drop guidance"], { cwd: consumerRoot });
+
+      const missingBoth = await run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+      assert.match(missingBoth.stdout, /SANDCASTLE RUN: COMPLETED/);
+      assert.match(
+        missingBoth.stdout,
+        /No CODING_STANDARDS\.md found.*general good practice/
+      );
+      assert.match(missingBoth.stdout, /No AGENTS\.md found/);
+
+      await writeFile(path.join(consumerRoot, "CODING_STANDARDS.md"), "# Standards\n");
+      await writeFile(path.join(consumerRoot, "AGENTS.md"), "# Agents\n");
+      await run("git", ["add", "CODING_STANDARDS.md", "AGENTS.md"], { cwd: consumerRoot });
+      await run("git", ["commit", "--quiet", "-m", "add guidance"], { cwd: consumerRoot });
+      const presentBoth = await run(shim, ["--dry-run"], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+      assert.match(presentBoth.stdout, /SANDCASTLE RUN: COMPLETED/);
+      assert.doesNotMatch(presentBoth.stdout, /No CODING_STANDARDS\.md found/);
+      assert.doesNotMatch(presentBoth.stdout, /No AGENTS\.md found/);
+    });
+  });
+
+  describe("Dockerfile guard", () => {
+    for (const { role, stopsBefore } of [
+      { role: "implementer", stopsBefore: "reviewer" },
+      { role: "reviewer", stopsBefore: "merger" },
+    ]) {
+      it(`aborts when the ${role} changes a Dockerfile`, async () => {
+        const { consumerRoot, shim, environment, capturePath, fixturePath } =
+          await prepareWorkflowConsumer(`pnpm-dockerfile-${role}`, {
+            readyIssueLists: [[standaloneIssue("42")]],
+          });
+
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: { ...environment, FAKE_AGENT_FILE_CHANGE: `${role}:tools/Dockerfile` },
+        });
+
+        const banner = `ABORTING RUN: ${role} for issue #42 changed Dockerfile(s): tools/Dockerfile.`;
+        assert.equal(error.code, 1);
+        assert.ok(`${error.stdout}\n${error.stderr}`.includes(banner));
+        const logs = await readLogs(consumerRoot);
+        assert.ok(
+          logs.some(({ name, contents }) => name.includes(role) && contents.includes(banner))
+        );
+        assert.equal((await readCapturedPhases(capturePath)).includes(stopsBefore), false);
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
+      });
+    }
+
+    it("fast-forwards the base and closes the issue after merger verification fixes", async () => {
+      const { consumerRoot, shim, environment, fixturePath } =
+        await prepareWorkflowConsumer("pnpm-merger-fix", {
+          readyIssueLists: [[standaloneIssue("42")]],
+        });
+
+      await run(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_AGENT_FILE_CHANGE: "merger:src/fix.js" },
+      });
+
+      const { stdout: baseFiles } = await run("git", ["ls-tree", "-r", "--name-only", "main"], {
+        cwd: consumerRoot,
+      });
+      assert.ok(baseFiles.split("\n").includes("src/fix.js"));
+      assert.deepEqual(await readClosedIssues(fixturePath), ["42"]);
+    });
+
+    it("aborts before the base moves when the merger changes a Dockerfile", async () => {
+      const { consumerRoot, shim, environment, fixturePath } =
+        await prepareWorkflowConsumer("pnpm-dockerfile-merger", {
+          readyIssueLists: [[standaloneIssue("42")]],
+        });
+      const { stdout: baseBefore } = await run("git", ["rev-parse", "main"], {
+        cwd: consumerRoot,
+      });
+
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_AGENT_FILE_CHANGE: "merger:Dockerfile" },
+      });
+
+      const banner = "ABORTING RUN: merger for issue #42 changed Dockerfile(s): Dockerfile.";
+      assert.equal(error.code, 1);
+      assert.ok(`${error.stdout}\n${error.stderr}`.includes(banner));
+      const logs = await readLogs(consumerRoot);
+      assert.ok(
+        logs.some(({ name, contents }) => name.includes("merger") && contents.includes(banner))
+      );
+      const { stdout: baseAfter } = await run("git", ["rev-parse", "main"], {
+        cwd: consumerRoot,
+      });
+      assert.equal(baseAfter, baseBefore);
+      assert.deepEqual(await readClosedIssues(fixturePath), []);
+    });
   });
 });

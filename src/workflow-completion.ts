@@ -1,4 +1,5 @@
 import type { RunEndStatus } from "./run-completion.ts";
+import type { BlockedStandaloneIssue } from "./spec-selection.ts";
 
 export class InvalidIssueGraphError extends Error {}
 
@@ -13,13 +14,29 @@ export function classifyPlanningError(
     : undefined;
 }
 
+export function formatBlockedStandaloneIssue({
+  issue,
+  openBlockerIds,
+}: BlockedStandaloneIssue): string {
+  return `#${issue.id} ${issue.title} is waiting on open blockers: ${openBlockerIds.map((id) => `#${id}`).join(", ")}`;
+}
+
 export function getNoStandaloneIssuesStatus({
+  blockedIssues,
   skippedStaleSelection,
   standalonePathSelected,
 }: {
+  blockedIssues: readonly BlockedStandaloneIssue[];
   skippedStaleSelection: boolean;
   standalonePathSelected: boolean;
 }): RunEndStatus {
+  if (blockedIssues.length > 0) {
+    return {
+      kind: "stopped",
+      reason: `Every remaining standalone issue is waiting on open blockers. ${blockedIssues.map(formatBlockedStandaloneIssue).join("; ")}.`,
+    };
+  }
+
   if (skippedStaleSelection) {
     return {
       kind: "stopped",
