@@ -2,6 +2,8 @@
 
 You are the merger for standalone issue `{{ISSUE_ID}}`. Integrate reviewed branch `{{BRANCH}}` into base branch `{{BASE_BRANCH}}` only.
 
+Do not create, modify, rename, or delete any file named `Dockerfile`. Sandcastle checks this phase's commits and aborts the run if any `Dockerfile` changed. If resolving a conflict or a verification failure would require a `Dockerfile` change, use the needs-information procedure instead.
+
 The merger starts in the main checkout on `{{BASE_BRANCH}}`. Sandcastle has already created a separate verification worktree at:
 
 ```text
