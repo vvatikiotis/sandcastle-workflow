@@ -80,9 +80,9 @@ async function resolvePromptSelection(options: {
   workflowRoot: string;
 }): Promise<PromptSelection> {
   const { filename, projectRoot, workflowRoot } = options;
-  const builtInPath = await requireReadableRegularFile(
+  const packagedPath = await requireReadableRegularFile(
     path.join(workflowRoot, "defaults", "prompts", filename),
-    `Built-in prompt ${filename}`
+    `Packaged prompt ${filename}`
   );
   const guidancePath = path.join(projectRoot, ".sandcastle", filename);
 
@@ -90,7 +90,7 @@ async function resolvePromptSelection(options: {
     await lstat(guidancePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { filename, path: builtInPath, guidance: "" };
+      return { filename, path: packagedPath, guidance: "" };
     }
     throw new Error(`Could not inspect project guidance ${filename}.`, {
       cause: error,
@@ -109,7 +109,7 @@ async function resolvePromptSelection(options: {
 
   return {
     filename,
-    path: builtInPath,
+    path: packagedPath,
     guidance: await readFile(resolvedGuidancePath, "utf8"),
     guidancePath: resolvedGuidancePath,
   };
