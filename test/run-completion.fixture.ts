@@ -42,7 +42,27 @@ switch (process.argv[2]) {
   case "stale-empty":
     reporter.setStatus(
       getNoStandaloneIssuesStatus({
+        blockedIssues: [],
         skippedStaleSelection: true,
+        standalonePathSelected: true,
+      })
+    );
+    break;
+  case "blocked-empty":
+    reporter.setStatus(
+      getNoStandaloneIssuesStatus({
+        blockedIssues: [
+          {
+            issue: {
+              id: "42",
+              title: "Blocked",
+              createdAt: "2026-01-01T00:00:00Z",
+              parentId: null,
+            },
+            openBlockerIds: ["7"],
+          },
+        ],
+        skippedStaleSelection: false,
         standalonePathSelected: true,
       })
     );
@@ -50,6 +70,7 @@ switch (process.argv[2]) {
   case "empty":
     reporter.setStatus(
       getNoStandaloneIssuesStatus({
+        blockedIssues: [],
         skippedStaleSelection: false,
         standalonePathSelected: true,
       })

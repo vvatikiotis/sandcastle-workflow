@@ -104,6 +104,30 @@ export function selectStandaloneCandidates({
     );
 }
 
+export type BlockedStandaloneIssue = {
+  issue: ReadyIssue;
+  openBlockerIds: string[];
+};
+
+// Eligibility includes native blockers, so a Standalone Issue with an open
+// blocker waits instead of being selected.
+export function partitionStandaloneByOpenBlockers(
+  standaloneIssues: readonly ReadyIssue[],
+  openBlockerIdsByIssue: ReadonlyMap<string, readonly string[]>
+): { unblocked: ReadyIssue[]; blocked: BlockedStandaloneIssue[] } {
+  const unblocked: ReadyIssue[] = [];
+  const blocked: BlockedStandaloneIssue[] = [];
+  for (const issue of standaloneIssues) {
+    const openBlockerIds = openBlockerIdsByIssue.get(issue.id) ?? [];
+    if (openBlockerIds.length === 0) {
+      unblocked.push(issue);
+    } else {
+      blocked.push({ issue, openBlockerIds: [...openBlockerIds] });
+    }
+  }
+  return { unblocked, blocked };
+}
+
 export function validateSpecGraph(candidate: SpecCandidate): string[] {
   const errors: string[] = [];
   const childrenById = new Map(

@@ -25,13 +25,53 @@ export type PromptSelection = {
   guidancePath?: string;
 };
 
-export async function requireProjectCodingStandards(
+export type OptionalProjectGuidance = {
+  codingStandards: boolean;
+  agentInstructions: boolean;
+};
+
+function getErrorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "code" in error
+    ? error.code
+    : undefined;
+}
+
+// An absent file is allowed; a present one must still be a readable regular
+// file so that agents are not silently given guidance they cannot read.
+async function hasOptionalProjectFile(
+  projectRoot: string,
+  filename: string,
+  description: string
+): Promise<boolean> {
+  const filePath = path.join(projectRoot, filename);
+  try {
+    await lstat(filePath);
+  } catch (error) {
+    if (getErrorCode(error) === "ENOENT") {
+      return false;
+    }
+    throw new Error(`Could not inspect ${description}.`, { cause: error });
+  }
+  await requireReadableRegularFile(filePath, description);
+  return true;
+}
+
+export async function findOptionalProjectGuidance(
   projectRoot: string
-): Promise<void> {
-  await requireReadableRegularFile(
-    path.join(projectRoot, "CODING_STANDARDS.md"),
-    "Root project coding standards CODING_STANDARDS.md"
-  );
+): Promise<OptionalProjectGuidance> {
+  const [codingStandards, agentInstructions] = await Promise.all([
+    hasOptionalProjectFile(
+      projectRoot,
+      "CODING_STANDARDS.md",
+      "Root project coding standards CODING_STANDARDS.md"
+    ),
+    hasOptionalProjectFile(
+      projectRoot,
+      "AGENTS.md",
+      "Root project agent instructions AGENTS.md"
+    ),
+  ]);
+  return { codingStandards, agentInstructions };
 }
 
 async function resolvePromptSelection(options: {

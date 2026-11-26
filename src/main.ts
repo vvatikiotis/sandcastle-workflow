@@ -51,11 +51,13 @@ import {
 } from "./run-completion.ts";
 import {
   classifyPlanningError,
+  formatBlockedStandaloneIssue,
   getNoStandaloneIssuesStatus,
   InvalidIssueGraphError,
 } from "./workflow-completion.ts";
 import {
   getBlockedReadyChildren,
+  partitionStandaloneByOpenBlockers,
   getEligibleChildren,
   getIssueStatus,
   selectRunSpec,
@@ -65,6 +67,7 @@ import {
   type ReadyIssue,
   type SpecCandidate,
   type SpecChild,
+  type BlockedStandaloneIssue,
 } from "./spec-selection.ts";
 import {
   shouldJumpToMergerAfterReuseForSpec,
@@ -85,7 +88,7 @@ import {
   type NodeModulesOverlay,
 } from "./node-modules-overlay.ts";
 import {
-  requireProjectCodingStandards,
+  findOptionalProjectGuidance,
   resolvePromptFiles,
 } from "./prompt-resolution.ts";
 import { isWithinDirectory } from "./file-resolution.ts";
@@ -618,7 +621,7 @@ const AGENT_CONFIG = {
   },
 } as const;
 
-await requireProjectCodingStandards(projectRoot);
+const optionalGuidance = await findOptionalProjectGuidance(projectRoot);
 const promptFiles = await resolvePromptFiles({ projectRoot, workflowRoot });
 for (const selection of promptFiles.selections) {
   console.log(
@@ -631,6 +634,14 @@ for (const selection of promptFiles.selections) {
       ),
     );
   }
+}
+if (!optionalGuidance.codingStandards) {
+  console.log(
+    "Info: No CODING_STANDARDS.md found; reviewers will apply general good practice.",
+  );
+}
+if (!optionalGuidance.agentInstructions) {
+  console.log("Info: No AGENTS.md found.");
 }
 
 const agentEnvironmentPath = projectPath(".sandcastle", ".env");
@@ -1173,7 +1184,7 @@ async function getChangedDockerfiles(
 }
 
 async function throwIfDockerfileChanged(
-  role: "implementer" | "reviewer",
+  role: "implementer" | "reviewer" | "merger",
   issueId: string | number,
   changedDockerfiles: readonly string[],
   logPath: string,
@@ -1520,9 +1531,21 @@ async function getNativeSubIssues(specIssueId: string): Promise<SpecChild[]> {
   );
 }
 
+async function getOpenBlockerIds(issueId: string): Promise<string[]> {
+  const { blockerIds } = await getNativeSubIssueDetails(issueId);
+  const openBlockerIds: string[] = [];
+  for (const blockerId of blockerIds) {
+    if (!(await isIssueClosed(blockerId))) {
+      openBlockerIds.push(blockerId);
+    }
+  }
+  return openBlockerIds;
+}
+
 async function getWorkCandidates(): Promise<{
   candidates: SpecCandidate[];
   standaloneIssues: ReadyIssue[];
+  blockedStandaloneIssues: BlockedStandaloneIssue[];
   errors: string[];
 }> {
   const readyIssues = await getOpenReadyIssues();
@@ -1549,10 +1572,16 @@ async function getWorkCandidates(): Promise<{
   }
 
   const selection = selectSpecCandidates({ readyIssues, childrenByParent });
-  const standaloneIssues = selectStandaloneCandidates({
+  const standaloneCandidates = selectStandaloneCandidates({
     readyIssues,
     childrenByParent,
   });
+  const openBlockerIdsByIssue = new Map<string, string[]>();
+  for (const issue of standaloneCandidates) {
+    openBlockerIdsByIssue.set(issue.id, await getOpenBlockerIds(issue.id));
+  }
+  const { unblocked: standaloneIssues, blocked: blockedStandaloneIssues } =
+    partitionStandaloneByOpenBlockers(standaloneCandidates, openBlockerIdsByIssue);
 
   for (const candidate of selection.candidates) {
     selection.errors.push(...validateSpecGraph(candidate));
@@ -1566,7 +1595,7 @@ async function getWorkCandidates(): Promise<{
     }
   }
 
-  return { ...selection, standaloneIssues };
+  return { ...selection, standaloneIssues, blockedStandaloneIssues };
 }
 
 async function getSelectedIssueEligibilityError(
@@ -1685,6 +1714,66 @@ async function createMergerVerificationWorktree(
   await execFile("git", ["worktree", "add", verificationWorktreePath, branch]);
 }
 
+async function isAncestorCommit(
+  ancestor: string,
+  descendant: string,
+): Promise<boolean> {
+  try {
+    await execFile("git", ["merge-base", "--is-ancestor", ancestor, descendant]);
+    return true;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 1) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+// The merger only rebases, verifies, and commits on the reviewed branch. The
+// runner owns the base-branch update so that no agent commit reaches the base
+// branch before the Dockerfile guard has checked it.
+async function integrateReviewedBranch(options: {
+  issueId: string;
+  base: { branch: string; commit: string };
+  branch: string;
+  mergerLogPath: string;
+}): Promise<void> {
+  const { issueId, base, branch, mergerLogPath } = options;
+  const [baseCommit, branchCommit, checkedOutBranch] = await Promise.all([
+    getBranchCommit(base.branch),
+    getBranchCommit(branch),
+    getCheckedOutBranch(),
+  ]);
+
+  if (checkedOutBranch !== base.branch) {
+    throw new Error(
+      `Merger left ${checkedOutBranch} checked out instead of ${base.branch}.`,
+    );
+  }
+  if (baseCommit !== base.commit) {
+    throw new Error(
+      `${base.branch} moved from ${base.commit} to ${baseCommit} during the run; refusing to integrate ${branch}.`,
+    );
+  }
+  if (!(await isAncestorCommit(base.commit, branchCommit))) {
+    throw new Error(
+      `Merger reported success, but ${branch} is not rebased onto ${base.branch} at ${base.commit}.`,
+    );
+  }
+
+  // The captured base already contains every pre-run base change, so any
+  // Dockerfile in this diff came from an agent on the reviewed branch.
+  await throwIfDockerfileChanged(
+    "merger",
+    issueId,
+    await getChangedDockerfiles(base.commit, branchCommit),
+    mergerLogPath,
+  );
+
+  await execFile("git", ["merge", "--ff-only", branch]);
+  await execFile("gh", ["issue", "close", issueId]);
+}
+
 //
 // endregion Shared reviewed-branch workflow mechanics
 //
@@ -1783,9 +1872,18 @@ async function chooseWorkPath(): Promise<WorkPath> {
   }
 }
 
+function printBlockedStandaloneIssues(
+  blockedStandaloneIssues: readonly BlockedStandaloneIssue[],
+): void {
+  for (const blocked of blockedStandaloneIssues) {
+    console.log(`Standalone issue ${formatBlockedStandaloneIssue(blocked)}.`);
+  }
+}
+
 function printDryRun(
   specCandidates: readonly SpecCandidate[],
   standaloneIssues: readonly ReadyIssue[],
+  blockedStandaloneIssues: readonly BlockedStandaloneIssue[],
   errors: readonly string[],
   workPath?: WorkPath,
 ): void {
@@ -1801,9 +1899,15 @@ function printDryRun(
     return;
   }
 
+  printBlockedStandaloneIssues(blockedStandaloneIssues);
+
   if (specCandidates.length === 0) {
     if (standaloneIssues.length === 0) {
-      console.log("No open ready-for-agent issues found. Dry run complete.");
+      console.log(
+        blockedStandaloneIssues.length === 0
+          ? "No open ready-for-agent issues found. Dry run complete."
+          : "No unblocked standalone issues to implement. Dry run complete.",
+      );
       return;
     }
 
@@ -1893,21 +1997,14 @@ async function getStandaloneEligibilityErrorDetail(
     return `Standalone issue #${issueId} now has parent #${issue.parentId}.`;
   }
 
-  const [children, details] = await Promise.all([
+  const [children, openBlockers] = await Promise.all([
     getNativeSubIssues(issueId),
-    getNativeSubIssueDetails(issueId),
+    getOpenBlockerIds(issueId),
   ]);
   if (children.length > 0) {
     return `Standalone issue #${issueId} now has native sub-issues.`;
   }
 
-  const openBlockers = (
-    await Promise.all(
-      details.blockerIds.map(async (blockerId) =>
-        (await isIssueClosed(blockerId)) ? undefined : blockerId,
-      ),
-    )
-  ).filter((blockerId): blockerId is string => blockerId !== undefined);
   if (openBlockers.length > 0) {
     return `Standalone issue #${issueId} has open blockers: ${openBlockers.map((blockerId) => `#${blockerId}`).join(", ")}.`;
   }
@@ -2359,39 +2456,22 @@ async function runStandaloneIssue(
 
   if (!(await removeVerificationWorktree(verificationWorktreePath))) {
     console.warn(
-      `WARNING: Standalone issue #${issue.id} may already be integrated and closed, but host cleanup failed. The runner will not roll back the merge or reopen the issue.`,
+      `WARNING: Standalone issue #${issue.id} was not integrated because host verification-worktree cleanup failed.`,
     );
     process.exitCode = 1;
     return {
       outcome: "aborted",
-      reason: `Standalone issue #${issue.id} integration completed, but host verification-worktree cleanup failed.`,
+      reason: `Standalone issue #${issue.id} was not integrated because host verification-worktree cleanup failed.`,
     };
   }
 
   try {
-    const [baseCommit, issueCommit, checkedOutBranch, issueClosed] =
-      await Promise.all([
-        getBranchCommit(baseSnapshot.branch),
-        getBranchCommit(branch),
-        getCheckedOutBranch(),
-        isIssueClosed(issue.id),
-      ]);
-
-    if (baseCommit !== issueCommit) {
-      throw new Error(
-        `Standalone merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`,
-      );
-    }
-    if (checkedOutBranch !== baseSnapshot.branch) {
-      throw new Error(
-        `Standalone merger left ${checkedOutBranch} checked out instead of ${baseSnapshot.branch}.`,
-      );
-    }
-    if (!issueClosed) {
-      throw new Error(
-        `Standalone merger reported success, but issue #${issue.id} remains open.`,
-      );
-    }
+    await integrateReviewedBranch({
+      issueId: issue.id,
+      base: baseSnapshot,
+      branch,
+      mergerLogPath,
+    });
   } catch (error) {
     await recoverAfterMergerValidationFailure(
       error,
@@ -2480,6 +2560,7 @@ if (recoverySucceeded) {
     const {
       candidates: specCandidates,
       standaloneIssues,
+      blockedStandaloneIssues,
       errors,
     } = workCandidates;
 
@@ -2491,7 +2572,13 @@ if (recoverySucceeded) {
       ) {
         workPath = await chooseWorkPath();
       }
-      printDryRun(specCandidates, standaloneIssues, errors, workPath);
+      printDryRun(
+        specCandidates,
+        standaloneIssues,
+        blockedStandaloneIssues,
+        errors,
+        workPath,
+      );
       runEndStatus =
         errors.length === 0
           ? {
@@ -2533,8 +2620,10 @@ if (recoverySucceeded) {
       workPath === "standalone" ||
       (workPath !== "spec" && specCandidates.length === 0)
     ) {
+      printBlockedStandaloneIssues(blockedStandaloneIssues);
       if (standaloneIssues.length === 0) {
         runEndStatus = getNoStandaloneIssuesStatus({
+          blockedIssues: blockedStandaloneIssues,
           skippedStaleSelection: skippedStaleStandaloneSelection,
           standalonePathSelected: workPath === "standalone",
         });
@@ -3207,51 +3296,23 @@ if (recoverySucceeded) {
 
     if (!(await removeVerificationWorktree(verificationWorktreePath))) {
       console.warn(
-        `WARNING: Issue #${plannedIssue.id} may already be integrated and closed, but host cleanup failed. The runner will not roll back the merge or reopen the issue.`,
+        `WARNING: Issue #${plannedIssue.id} was not integrated because host verification-worktree cleanup failed.`,
       );
       runEndStatus = {
         kind: "aborted",
-        reason: `Issue #${plannedIssue.id} integration completed, but host verification-worktree cleanup failed.`,
+        reason: `Issue #${plannedIssue.id} was not integrated because host verification-worktree cleanup failed.`,
       };
       process.exitCode = 1;
       break;
     }
 
     try {
-      const [baseCommit, issueCommit, checkedOutBranch, issueClosed] =
-        await Promise.all([
-          getBranchCommit(baseSnapshot.branch),
-          getBranchCommit(branch),
-          getCheckedOutBranch(),
-          isIssueClosed(plannedIssue.id),
-        ]);
-
-      if (baseCommit !== issueCommit) {
-        console.warn(
-          `WARNING: Merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`,
-        );
-        throw new Error(
-          `Merger reported success, but ${baseSnapshot.branch} does not match ${branch}.`,
-        );
-      }
-
-      if (checkedOutBranch !== baseSnapshot.branch) {
-        console.warn(
-          `WARNING: Merger reported success, but ${checkedOutBranch} is checked out instead of ${baseSnapshot.branch}.`,
-        );
-        throw new Error(
-          `Merger left ${checkedOutBranch} checked out instead of ${baseSnapshot.branch}.`,
-        );
-      }
-
-      if (!issueClosed) {
-        console.warn(
-          `WARNING: Merger reported success, but issue #${plannedIssue.id} remains open.`,
-        );
-        throw new Error(
-          `Merger reported success, but issue #${plannedIssue.id} remains open.`,
-        );
-      }
+      await integrateReviewedBranch({
+        issueId: plannedIssue.id,
+        base: baseSnapshot,
+        branch,
+        mergerLogPath,
+      });
     } catch (error) {
       await recoverAfterMergerValidationFailure(
         error,

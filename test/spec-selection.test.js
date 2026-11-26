@@ -5,6 +5,7 @@ import {
   getBlockedReadyChildren,
   getEligibleChildren,
   getIssueStatus,
+  partitionStandaloneByOpenBlockers,
   selectRunSpec,
   selectSpecCandidates,
   selectStandaloneCandidates,
@@ -214,5 +215,30 @@ describe("Sandcastle native sub-issue selection", () => {
       "needs-info"
     );
     assert.equal(getIssueStatus({ state: "OPEN", labels: [] }), "open");
+  });
+
+  it("holds standalone issues with open blockers back and keeps selection order", () => {
+    const issue = (id) => ({
+      id,
+      title: `Issue ${id}`,
+      createdAt: "2026-07-13T16:16:03Z",
+      parentId: null,
+    });
+
+    const result = partitionStandaloneByOpenBlockers(
+      [issue("41"), issue("42"), issue("43")],
+      new Map([
+        ["41", []],
+        ["42", ["7", "9"]],
+      ])
+    );
+
+    assert.deepEqual(
+      result.unblocked.map(({ id }) => id),
+      ["41", "43"]
+    );
+    assert.deepEqual(result.blocked, [
+      { issue: issue("42"), openBlockerIds: ["7", "9"] },
+    ]);
   });
 });
