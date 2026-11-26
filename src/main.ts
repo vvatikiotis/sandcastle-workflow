@@ -1181,6 +1181,29 @@ async function getBranchCommit(branch: string): Promise<string> {
   return commit;
 }
 
+// A leftover issue branch holds a committed implementation only when it has
+// commits the base lacks. Its head alone differs from the base commit whenever
+// the base moved on after the branch was created, even with no work on it.
+async function hasCommitsBeyondBase(
+  branch: string,
+  baseCommit: string,
+): Promise<boolean> {
+  const { stdout } = await execFile("git", [
+    "rev-list",
+    "--count",
+    `${baseCommit}..${branch}`,
+  ]);
+  const count = Number.parseInt(stdout.trim(), 10);
+
+  if (Number.isNaN(count)) {
+    throw new Error(
+      `Git returned an invalid commit count for ${branch}: ${stdout}`,
+    );
+  }
+
+  return count > 0;
+}
+
 async function getChangedDockerfiles(
   beforeCommit: string,
   afterCommit: string,
@@ -1744,6 +1767,20 @@ async function isAncestorCommit(
   }
 }
 
+// A reused branch keeps its stale base; the merger, not the runner, rebases it.
+async function reportReusedBranchBehindBase(
+  branch: string,
+  base: { branch: string; commit: string },
+): Promise<void> {
+  if (await isAncestorCommit(base.commit, branch)) {
+    return;
+  }
+
+  console.log(
+    `Info: ${branch} is behind ${base.branch} at ${base.commit}; the merger will rebase it onto ${base.branch}.`,
+  );
+}
+
 // The merger only rebases, verifies, and commits on the reviewed branch. The
 // runner owns the base-branch update so that no agent commit reaches the base
 // branch before the Dockerfile guard has checked it.
@@ -2137,8 +2174,10 @@ async function runStandaloneIssue(
     });
     const activeSandbox = sandbox;
     const branchCommitBeforeImplementation = await getBranchCommit(branch);
-    const reusingImplementation =
-      branchCommitBeforeImplementation !== baseSnapshot.commit;
+    const reusingImplementation = await hasCommitsBeyondBase(
+      branch,
+      baseSnapshot.commit,
+    );
     let jumpToMerger = false;
     if (!reusingImplementation) {
       const runName = createRunName(
@@ -2204,6 +2243,7 @@ async function runStandaloneIssue(
       console.log(
         `Reusing committed standalone implementation on ${branch}; checking whether to continue review or jump to merger.`,
       );
+      await reportReusedBranchBehindBase(branch, baseSnapshot);
       jumpToMerger = await shouldSkipReviewerAfterRerun(
         branch,
         issue.id,
@@ -2948,13 +2988,16 @@ if (recoverySucceeded) {
       });
       const activeSandbox = sandbox;
       const branchCommitBeforeImplementation = await getBranchCommit(branch);
-      const reusingImplementation =
-        branchCommitBeforeImplementation !== baseSnapshot.commit;
+      const reusingImplementation = await hasCommitsBeyondBase(
+        branch,
+        baseSnapshot.commit,
+      );
       let jumpToMerger = false;
       if (reusingImplementation) {
         console.log(
           `Reusing committed implementation on ${branch}; checking whether to continue review or jump to merger.`,
         );
+        await reportReusedBranchBehindBase(branch, baseSnapshot);
         jumpToMerger = await shouldSkipReviewerAfterRerun(
           branch,
           plannedIssue.id,

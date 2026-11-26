@@ -267,7 +267,16 @@ export function codex(model, options) {
 }
 
 export async function createSandbox(options) {
-  execFileSync("git", ["branch", options.branch], { cwd: options.cwd });
+  // Like the real SDK, reuse an existing issue branch and create a missing one
+  // from the checked-out base.
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/" + options.branch], {
+      cwd: options.cwd,
+      stdio: "ignore",
+    });
+  } catch {
+    execFileSync("git", ["branch", options.branch], { cwd: options.cwd });
+  }
   capture({ type: "sandbox", hooks: options.hooks });
   return {
     async run(runOptions) {
@@ -2291,6 +2300,134 @@ fi
       assert.match(presentBoth.stdout, /SANDCASTLE RUN: COMPLETED/);
       assert.doesNotMatch(presentBoth.stdout, /No CODING_STANDARDS\.md found/);
       assert.doesNotMatch(presentBoth.stdout, /No AGENTS\.md found/);
+    });
+  });
+
+  describe("leftover issue branch", () => {
+    it("runs the implementer when a leftover branch has no commits of its own and the base moved on", async () => {
+      const { consumerRoot, shim, environment, capturePath } =
+        await prepareWorkflowConsumer("pnpm-leftover-behind", {
+          readyIssueLists: [[standaloneIssue("42")]],
+        });
+      // An earlier run created the issue branch but committed nothing on it.
+      await run("git", ["branch", "sandcastle/issue-42"], { cwd: consumerRoot });
+      await run("git", ["commit", "--quiet", "--allow-empty", "-m", "base moves on"], {
+        cwd: consumerRoot,
+      });
+
+      const result = await run(shim, [], { cwd: consumerRoot, env: environment }).catch(
+        (error) => error
+      );
+
+      assert.doesNotMatch(result.stdout, /Reusing committed standalone implementation/);
+      assert.equal((await readCapturedPhases(capturePath))[0], "standalone-implementer");
+    });
+
+    it("runs the spec implementer when a leftover child branch has no commits of its own and the base moved on", async () => {
+      const { consumerRoot, shim, environment, capturePath } =
+        await prepareWorkflowConsumer("pnpm-leftover-behind-spec", {
+          readyIssueLists: [
+            [
+              { id: "10", title: "Spec 10", createdAt: "2026-01-01T00:00:10Z", parentId: null },
+              { id: "11", title: "Child 11", createdAt: "2026-01-01T00:00:11Z", parentId: "10" },
+            ],
+          ],
+          subIssues: {
+            10: [{ number: 11, title: "Child 11", state: "open", labels: [{ name: "ready-for-agent" }] }],
+          },
+          parents: { 11: "10" },
+          blockers: { 10: ["11"] },
+          blocking: { 11: ["10"] },
+        });
+      await run("git", ["branch", "sandcastle/issue-11"], { cwd: consumerRoot });
+      await run("git", ["commit", "--quiet", "--allow-empty", "-m", "base moves on"], {
+        cwd: consumerRoot,
+      });
+
+      const result = await run(shim, [], { cwd: consumerRoot, env: environment }).catch(
+        (error) => error
+      );
+
+      assert.match(result.stdout, /Selected issue #11/);
+      assert.doesNotMatch(result.stdout, /Reusing committed implementation/);
+      assert.equal((await readCapturedPhases(capturePath))[0], "implementer");
+    });
+  });
+
+  describe("reused issue branch behind the base", () => {
+    // An earlier run committed an implementation on the issue branch; the base
+    // optionally moves on afterwards.
+    async function prepareReusedBranch(manager, fixture, issueId, { baseMoves }) {
+      const prepared = await prepareWorkflowConsumer(manager, fixture);
+      const { consumerRoot } = prepared;
+      await run("git", ["switch", "--quiet", "-c", `sandcastle/issue-${issueId}`], {
+        cwd: consumerRoot,
+      });
+      await run("git", ["commit", "--quiet", "--allow-empty", "-m", "earlier implementation"], {
+        cwd: consumerRoot,
+      });
+      await run("git", ["switch", "--quiet", "main"], { cwd: consumerRoot });
+      if (baseMoves) {
+        await run("git", ["commit", "--quiet", "--allow-empty", "-m", "base moves on"], {
+          cwd: consumerRoot,
+        });
+      }
+      const { stdout } = await run("git", ["rev-parse", "main"], { cwd: consumerRoot });
+      return { ...prepared, baseCommit: stdout.trim() };
+    }
+
+    const specFixture = {
+      readyIssueLists: [
+        [
+          { id: "10", title: "Spec 10", createdAt: "2026-01-01T00:00:10Z", parentId: null },
+          { id: "11", title: "Child 11", createdAt: "2026-01-01T00:00:11Z", parentId: "10" },
+        ],
+      ],
+      subIssues: {
+        10: [{ number: 11, title: "Child 11", state: "open", labels: [{ name: "ready-for-agent" }] }],
+      },
+      parents: { 11: "10" },
+      blockers: { 10: ["11"] },
+      blocking: { 11: ["10"] },
+    };
+
+    for (const { workPath, fixture, issueId } of [
+      { workPath: "standalone", fixture: { readyIssueLists: [[standaloneIssue("42")]] }, issueId: "42" },
+      { workPath: "spec", fixture: specFixture, issueId: "11" },
+    ]) {
+      it(`reports that the merger will rebase a reused ${workPath} branch that is behind the base`, async () => {
+        const { consumerRoot, shim, environment, baseCommit } = await prepareReusedBranch(
+          `pnpm-reused-behind-${workPath}`,
+          fixture,
+          issueId,
+          { baseMoves: true }
+        );
+
+        const result = await run(shim, [], { cwd: consumerRoot, env: environment }).catch(
+          (error) => error
+        );
+
+        assert.ok(
+          result.stdout.includes(
+            `Info: sandcastle/issue-${issueId} is behind main at ${baseCommit}; the merger will rebase it onto main.`
+          ),
+          result.stdout
+        );
+      });
+    }
+
+    it("does not report a rebase for a reused branch that is up to date with the base", async () => {
+      const { consumerRoot, shim, environment } = await prepareReusedBranch(
+        "pnpm-reused-current",
+        { readyIssueLists: [[standaloneIssue("42")]] },
+        "42",
+        { baseMoves: false }
+      );
+
+      const result = await run(shim, [], { cwd: consumerRoot, env: environment });
+
+      assert.match(result.stdout, /Reusing committed standalone implementation/);
+      assert.doesNotMatch(result.stdout, /is behind main/);
     });
   });
 
