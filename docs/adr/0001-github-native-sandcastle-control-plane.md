@@ -18,7 +18,7 @@ Agents receive the selected IDs and read GitHub only for context and narrow race
 ## Consequences
 
 - Sandcastle does not invoke a planner model for issue selection.
-- GitHub relationship publication must happen before a Sandcastle run, using `.agents/skills/github-ticket-relationships/SKILL.md`.
+- GitHub relationship publication must happen before a Sandcastle run, for example using the relationship skill (`.agents/skills/github-ticket-relationships/SKILL.md`).
 - An invalid graph stops the run with an explicit error; Sandcastle never repairs GitHub relationships automatically.
 - GitHub native sub-issue order is the priority order among otherwise eligible children.
 - Final review runs only when every direct native child is closed.

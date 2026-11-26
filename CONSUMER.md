@@ -17,7 +17,7 @@ These steps install version `0.7.0` in a new pnpm consumer.
 
 2. **Prepare the consumer**
 
-   Add working, non-empty `test` and `typecheck` scripts to `package.json`. Add a `CODING_STANDARDS.md` file with the project rules agents must follow.
+   Add working, non-empty `test` and `typecheck` scripts to `package.json`. Optionally add a `CODING_STANDARDS.md` file with the project rules agents must follow. Without it, Sandcastle prints an info message and reviewers apply general good practice instead.
 
 3. **Copy and verify the reviewed artifact**
 
@@ -82,7 +82,9 @@ These steps install version `0.7.0` in a new pnpm consumer.
 
    The workflow does not work without this PAT and these permissions.
 
-8. **Expose the ticket-relationship skill**
+8. **Optional: expose the ticket-relationship skill**
+
+   Skip this step if you publish specification relationships with GitHub CLI or the GitHub web UI instead of an agent.
 
    ```bash
    mkdir -p .agents/skills
@@ -98,7 +100,7 @@ These steps install version `0.7.0` in a new pnpm consumer.
    exists to create native sub-issue and dependency relationships.
    ```
 
-   Commit the tarball, package manifest, lockfile, `.sandcastle` examples, relative symbolic link, `AGENTS.md`, and `CODING_STANDARDS.md` together. Keep the active `.sandcastle/.env` and `.sandcastle/sandcastle.env` files ignored and uncommitted.
+   Commit the tarball, package manifest, lockfile, `.sandcastle` examples, and, when present, the relative symbolic link, `AGENTS.md`, and `CODING_STANDARDS.md` together. Keep the active `.sandcastle/.env` and `.sandcastle/sandcastle.env` files ignored and uncommitted.
 
 9. **Prepare GitHub work**
 
@@ -107,7 +109,7 @@ These steps install version `0.7.0` in a new pnpm consumer.
    gh auth status
    ```
 
-   Create the required labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. Then create an eligible standalone issue, or use the installed relationship skill to publish and verify a specification with its child and dependency relationships.
+   Create the required labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. Then create an eligible standalone issue, or publish and verify a specification with its child and dependency relationships, using the relationship skill, GitHub CLI, or the GitHub web UI.
 
 10. **Build and validate**
 
@@ -251,14 +253,15 @@ The Git root must contain:
 
 - `package.json` with non-empty `test` and `typecheck` scripts
 - exactly one supported lockfile
-- `CODING_STANDARDS.md`
-- `.agents/skills/github-ticket-relationships` linked to the installed package skill
-- `AGENTS.md` with the instruction that tells agents when to load that skill
 - a GitHub.com `origin` remote and working GitHub CLI authentication
 - a GitHub CLI release that supports the native `parent`, `blockedBy`, and `blocking` issue fields; update the CLI if relationship preflight reports an unsupported field
 - labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`
 
-`GLOSSARY.md` and project ADRs are optional. Prompts use them only when present.
+`GLOSSARY.md`, project ADRs, `CODING_STANDARDS.md`, `AGENTS.md`, and the relationship skill link are optional. Prompts use them only when present.
+
+- Without a root `CODING_STANDARDS.md`, preflight and the dry run print an info message, and reviewers check standards against general good practice and say so in their review.
+- Without a root `AGENTS.md`, preflight and the dry run print an info message.
+- To let agents publish specification relationships, link `.agents/skills/github-ticket-relationships` to the installed package skill and add the quick-start step 8 instruction to `AGENTS.md`.
 
 A declared `packageManager` must identify npm 10 or pnpm 11 and match its lockfile. Without a declaration, `package-lock.json` selects npm and `pnpm-lock.yaml` selects pnpm. Both lockfiles, missing lockfiles, npm shrinkwrap, unsupported managers, unsupported majors, and malformed declarations fail preflight.
 
@@ -274,19 +277,20 @@ Monorepositories are supported only when package metadata, lockfile, configurati
 
 ## GitHub control plane
 
-Before the dry run in quick-start step 10, complete steps 8 and 9. Step 8 makes the relationship skill discoverable before an agent publishes specification children; step 9 prepares the required GitHub configuration and work. Native GitHub relationships determine all executable work:
+Before the dry run in quick-start step 10, complete step 9, which prepares the required GitHub configuration and work. Complete optional step 8 first if an agent will publish specification children. Native GitHub relationships determine all executable work:
 
 - direct sub-issues define a specification's children;
 - child-to-child blocking edges define eligibility;
 - every child blocks its parent specification;
 - one specification is selected per invocation;
-- final review runs only after every direct child closes.
+- final review runs only after every direct child closes;
+- a standalone issue with an open blocker is not selected and waits until every blocker closes. Other unblocked standalone issues still run. When every standalone candidate is blocked, the run stops with status `3` and lists the open blockers, and the dry run reports blocked issues as waiting.
 
 Sandcastle validates these relationships and never infers, creates, or repairs them. Version `0.7.0` allows at most 100 simultaneously eligible issues and stops safely when the limit is exceeded. GitHub limits a parent to 100 direct sub-issues.
 
-The package includes the required Agent Skills-standard `github-ticket-relationships` skill. Step 8 configures it project-locally. The symbolic link makes the skill discoverable, and the `AGENTS.md` instruction tells agents when to use it. Both are required consumer setup. Initialization prints the installed source path but does not create the link or modify agent settings.
+The package includes the optional Agent Skills-standard `github-ticket-relationships` skill. Step 8 configures it project-locally. The symbolic link makes the skill discoverable, and the `AGENTS.md` instruction tells agents when to use it. Both are needed only when agents publish specification relationships. Initialization prints the installed source path but does not create the link or modify agent settings.
 
-Humans and other tools can create the same graph with GitHub CLI: attach each child natively to its parent, add each approved child dependency from the blocked child, and make every child block its parent. Verify the resulting parent, blockers, and blocking edges before running Sandcastle.
+Humans and other tools can create the same graph with GitHub CLI or the GitHub web UI: attach each child natively to its parent, add each approved child dependency from the blocked child, and make every child block its parent. Verify the resulting parent, blockers, and blocking edges before running Sandcastle.
 
 ## Prompts and project guidance
 
@@ -340,7 +344,7 @@ pnpm sandcastle build-image
 
 An npm consumer uses `npm run sandcastle -- build-image`. Updating the workflow package does not replace an existing `.sandcastle/Dockerfile`; review the packaged default manually and merge relevant changes into the Consumer Repository override when needed.
 
-Implementer and reviewer agents must not change any file named `Dockerfile` in a Consumer Repository. After each of these agent phases finishes, Sandcastle compares the branch commits. If that phase changed a Dockerfile, Sandcastle writes a prominent `ABORTING RUN` banner and the affected paths to that phase's log, then aborts with an error before starting the next phase or merging. A maintainer must inspect the branch and make Dockerfile changes outside an agent run.
+Implementer, reviewer, and merger agents must not change any file named `Dockerfile` in a Consumer Repository. After the implementer and reviewer phases, Sandcastle compares the branch commits; for the merger, it checks the merger's commits before they reach the base branch. If a phase changed a Dockerfile, Sandcastle writes a prominent `ABORTING RUN` banner and the affected paths to that phase's log, then aborts with an error before starting the next phase or updating the base branch. A maintainer must inspect the branch and make Dockerfile changes outside an agent run.
 
 ## State and security
 

@@ -26,7 +26,7 @@ Replace `<short message>` with a concise description. Comments about gaps, triag
 
 4. **Review domain consistency:** compare the integrated result with the specification's terminology, concepts, ownership boundaries, and `GLOSSARY.md` when present. Record only mismatches that materially change the specified domain behavior or boundary.
 
-5. **Review completion-critical standards:** read the root `CODING_STANDARDS.md` and applicable `AGENTS.md`. Record a standards finding only when repository evidence shows a documented violation that materially undermines specification completion.
+5. **Review completion-critical standards:** read the root `CODING_STANDARDS.md` when present and applicable `AGENTS.md`. Record a standards finding only when repository evidence shows a documented violation that materially undermines specification completion. When no root `CODING_STANDARDS.md` exists, apply general good practice from your own knowledge with the same threshold, and state under `Completion-critical standards`, and in your closing comment, that no `CODING_STANDARDS.md` was provided.
 
 6. **Review ADR conformance:** compare the integrated result with every applicable ADR and `docs/adr/README.md`. Treat those records as owner-authored and read-only. An implementation change to an ADR, or a result that requires an ADR change, is a completion gap requiring an owner decision.
 
