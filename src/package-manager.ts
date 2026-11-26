@@ -1,6 +1,8 @@
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { getErrorCode } from "./error-code.ts";
+
 export type SupportedPackageManager = {
   name: "npm" | "pnpm";
   major: 10 | 11;
@@ -41,12 +43,7 @@ async function pathExists(filePath: string): Promise<boolean> {
     await access(filePath);
     return true;
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
+    if (getErrorCode(error) === "ENOENT") {
       return false;
     }
     throw error;
@@ -63,12 +60,7 @@ async function regularFileExists(filePath: string): Promise<boolean> {
     }
     return true;
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
+    if (getErrorCode(error) === "ENOENT") {
       return false;
     }
     throw error;

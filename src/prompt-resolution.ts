@@ -1,6 +1,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
+import { getErrorCode } from "./error-code.ts";
 import {
   isWithinDirectory,
   requireReadableRegularFile,
@@ -29,12 +30,6 @@ export type OptionalProjectGuidance = {
   codingStandards: boolean;
   agentInstructions: boolean;
 };
-
-function getErrorCode(error: unknown): unknown {
-  return typeof error === "object" && error !== null && "code" in error
-    ? error.code
-    : undefined;
-}
 
 // An absent file is allowed; a present one must still be a readable regular
 // file so that agents are not silently given guidance they cannot read.
@@ -89,7 +84,7 @@ async function resolvePromptSelection(options: {
   try {
     await lstat(guidancePath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (getErrorCode(error) === "ENOENT") {
       return { filename, path: packagedPath, guidance: "" };
     }
     throw new Error(`Could not inspect project guidance ${filename}.`, {
@@ -115,14 +110,18 @@ async function resolvePromptSelection(options: {
   };
 }
 
+export type PromptFiles = {
+  // The Packaged Default prompt path.
+  get: (filename: PromptFilename) => string;
+  // Project Guidance for the prompt, or "" when the project adds none.
+  getGuidance: (filename: PromptFilename) => string;
+  selections: readonly PromptSelection[];
+};
+
 export async function resolvePromptFiles(options: {
   projectRoot: string;
   workflowRoot: string;
-}): Promise<{
-  get: (filename: PromptFilename) => string;
-  getGuidance: (filename: PromptFilename) => string;
-  selections: readonly PromptSelection[];
-}> {
+}): Promise<PromptFiles> {
   const canonicalProjectRoot = await realpath(options.projectRoot);
   const selections = await Promise.all(
     promptFilenames.map((filename) =>

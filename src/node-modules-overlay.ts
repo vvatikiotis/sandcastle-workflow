@@ -1,6 +1,8 @@
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
+import { getErrorCode } from "./error-code.ts";
+
 export type NodeModulesOverlay = {
   directory: string;
   mount: {
@@ -58,36 +60,33 @@ export async function removeNodeModulesOverlay(
   await rm(overlay.directory, { recursive: true, force: true });
 }
 
+async function settle<T>(
+  operation: () => Promise<T>
+): Promise<OperationResult<T>> {
+  try {
+    return { kind: "success", value: await operation() };
+  } catch (error) {
+    return { kind: "failure", error };
+  }
+}
+
 /**
- * Runs one sandbox lifecycle and removes its overlay even when that lifecycle
- * fails. Retaining both errors makes a failed agent run distinguishable from a
- * host-storage cleanup failure.
+ * Removes an overlay after the operation that used it, even when that
+ * operation fails. Retaining both errors makes a failed sandbox operation
+ * distinguishable from a host-storage cleanup failure.
  */
-export async function withNodeModulesOverlay<T>(
-  options: NodeModulesOverlayOptions,
-  operation: (overlay: NodeModulesOverlay) => Promise<T>
+async function removeOverlayAfter<T>(
+  overlay: NodeModulesOverlay,
+  operation: () => Promise<T>,
+  bothFailedMessage: string
 ): Promise<T> {
-  const overlay = await createNodeModulesOverlay(options);
-  let operationResult: OperationResult<T>;
-
-  try {
-    operationResult = { kind: "success", value: await operation(overlay) };
-  } catch (error) {
-    operationResult = { kind: "failure", error };
-  }
-
-  let cleanupResult: OperationResult<void>;
-  try {
-    await removeNodeModulesOverlay(overlay);
-    cleanupResult = { kind: "success", value: undefined };
-  } catch (error) {
-    cleanupResult = { kind: "failure", error };
-  }
+  const operationResult = await settle(operation);
+  const cleanupResult = await settle(() => removeNodeModulesOverlay(overlay));
 
   if (operationResult.kind === "failure" && cleanupResult.kind === "failure") {
     throw new AggregateError(
       [operationResult.error, cleanupResult.error],
-      "Sandbox operation and node_modules overlay cleanup both failed."
+      bothFailedMessage
     );
   }
   if (operationResult.kind === "failure") {
@@ -98,6 +97,31 @@ export async function withNodeModulesOverlay<T>(
   }
 
   return operationResult.value;
+}
+
+/** Runs one sandbox lifecycle with a fresh overlay, then removes the overlay. */
+export async function withNodeModulesOverlay<T>(
+  options: NodeModulesOverlayOptions,
+  operation: (overlay: NodeModulesOverlay) => Promise<T>
+): Promise<T> {
+  const overlay = await createNodeModulesOverlay(options);
+  return removeOverlayAfter(
+    overlay,
+    () => operation(overlay),
+    "Sandbox operation and node_modules overlay cleanup both failed."
+  );
+}
+
+/** Closes a sandbox that mounts the overlay, then removes the overlay. */
+export async function closeSandboxWithNodeModulesOverlay<T>(
+  sandbox: { close: () => Promise<T> },
+  overlay: NodeModulesOverlay
+): Promise<T> {
+  return removeOverlayAfter(
+    overlay,
+    () => sandbox.close(),
+    "Sandbox closure and node_modules overlay cleanup both failed."
+  );
 }
 
 /**
@@ -163,13 +187,4 @@ function getProcessState(processId: number): "live" | "dead" | "unknown" {
   } catch (error) {
     return getErrorCode(error) === "ESRCH" ? "dead" : "unknown";
   }
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string"
-    ? error.code
-    : undefined;
 }

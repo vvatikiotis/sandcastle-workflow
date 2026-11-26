@@ -3,6 +3,13 @@ import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { getErrorCode } from "./error-code.ts";
+import { isWithinDirectory } from "./file-resolution.ts";
+import {
+  canonicalizePath,
+  listRegisteredWorktreePaths,
+} from "./worktree-registration.ts";
+
 type VerificationWorktreeCleanupResult =
   | { outcome: "removed" }
   | { outcome: "already-absent" }
@@ -56,15 +63,10 @@ export async function cleanupVerificationWorktree({
     );
   }
 
-  const relativeWorktreePath = path.relative(
-    resolvedWorkflowWorktreeRoot,
-    resolvedWorktreePath
-  );
+  // The worktree root itself is not a worktree, so it must be strictly inside.
   if (
-    relativeWorktreePath === "" ||
-    path.isAbsolute(relativeWorktreePath) ||
-    relativeWorktreePath === ".." ||
-    relativeWorktreePath.startsWith(`..${path.sep}`)
+    path.relative(resolvedWorkflowWorktreeRoot, resolvedWorktreePath) === "" ||
+    !isWithinDirectory(resolvedWorkflowWorktreeRoot, resolvedWorktreePath)
   ) {
     return preservedResult(
       resolvedWorktreePath,
@@ -165,25 +167,10 @@ async function inspectWorktreeState(
   repositoryPath: string,
   worktreePath: string
 ): Promise<WorktreeState> {
-  const [{ stdout }, pathExists] = await Promise.all([
-    execFile("git", [
-      "-C",
-      repositoryPath,
-      "worktree",
-      "list",
-      "--porcelain",
-      "-z",
-    ]),
+  const [registeredPaths, pathExists] = await Promise.all([
+    listRegisteredWorktreePaths(repositoryPath),
     fileExists(worktreePath),
   ]);
-  const registeredPaths = await Promise.all(
-    stdout
-      .split("\0")
-      .filter((entry) => entry.startsWith("worktree "))
-      .map((entry) =>
-        canonicalizePath(path.resolve(entry.slice("worktree ".length)))
-      )
-  );
 
   return {
     pathExists,
@@ -199,25 +186,6 @@ async function inspectWorktreeStateSafely(
     return { state: await inspectWorktreeState(repositoryPath, worktreePath) };
   } catch (error) {
     return { error };
-  }
-}
-
-async function canonicalizePath(filePath: string): Promise<string> {
-  try {
-    return await realpath(filePath);
-  } catch (error) {
-    if (getErrorCode(error) !== "ENOENT") {
-      throw error;
-    }
-
-    const parentPath = path.dirname(filePath);
-    if (parentPath === filePath) {
-      return filePath;
-    }
-    return path.join(
-      await canonicalizePath(parentPath),
-      path.basename(filePath)
-    );
   }
 }
 
@@ -282,13 +250,4 @@ function formatError(error: unknown): string {
     return error.message;
   }
   return String(error);
-}
-
-function getErrorCode(error: unknown): string | number | undefined {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (typeof error.code === "string" || typeof error.code === "number")
-    ? error.code
-    : undefined;
 }

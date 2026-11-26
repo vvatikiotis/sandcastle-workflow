@@ -53,6 +53,13 @@ function parsePhaseDetail(stdout: string): string | undefined {
     ?.trim();
 }
 
+function isAllowedOutcome<T extends string>(
+  value: string,
+  allowedOutcomes: readonly T[]
+): value is T {
+  return allowedOutcomes.some((allowed) => allowed === value);
+}
+
 function parsePhaseOutcome<T extends string>(
   stdout: string,
   allowedOutcomes: readonly T[]
@@ -62,13 +69,13 @@ function parsePhaseOutcome<T extends string>(
   ];
   const outcome = matches.at(-1)?.[1]?.trim();
 
-  if (!outcome || !allowedOutcomes.includes(outcome as T)) {
+  if (!outcome || !isAllowedOutcome(outcome, allowedOutcomes)) {
     throw new Error(
       `Agent did not provide a valid phase outcome. Expected one of: ${allowedOutcomes.join(", ")}.`
     );
   }
 
-  return outcome as T;
+  return outcome;
 }
 
 export async function runAgentPhase<T extends string>({

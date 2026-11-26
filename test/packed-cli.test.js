@@ -1540,8 +1540,12 @@ fi
       await assert.rejects(access(runLockPath));
       assert.equal(await readFile(recoverySymlinkTarget, "utf8"), "do not overwrite\n");
       assert.match(result.stdout, /Selected standalone issue #42/);
-      assert.match(result.stdout, /Standalone merge complete/);
+      assert.match(result.stdout, /Integration complete for standalone issue #42\./);
       assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+      assert.match(
+        result.stdout,
+        /Reason: Reached the 1-iteration limit after integrating standalone issue #42\./
+      );
       assert.equal((await readFile(issueStatePath, "utf8")).trim(), "CLOSED");
       assert.equal(
         await fingerprintInstalledPackage(consumerRoot),
@@ -1684,8 +1688,12 @@ fi
       },
     });
 
-    assert.match(result.stdout, /Selected issue #101: Child/);
-    assert.match(result.stdout, /Merge complete/);
+    assert.match(result.stdout, /Selected child issue #101: Child/);
+    assert.match(result.stdout, /Integration complete for child issue #101\./);
+    assert.match(
+      result.stdout,
+      /Reason: Reached the 1-iteration limit after integrating child issue #101\./
+    );
     assert.equal((await readFile(issueStatePath, "utf8")).trim(), "CLOSED");
     const captures = (await readFile(capturePath, "utf8"))
       .trim()
@@ -2236,9 +2244,9 @@ fi
       assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /stale/i);
       assert.deepEqual(await readClosedIssues(fixturePath), ["43"]);
       assert.deepEqual(await readCapturedPhases(capturePath), [
-        "standalone-implementer",
-        "standalone-reviewer",
-        "standalone-merger",
+        "implementer",
+        "reviewer",
+        "merger",
       ]);
     });
 
@@ -2319,8 +2327,8 @@ fi
         (error) => error
       );
 
-      assert.doesNotMatch(result.stdout, /Reusing committed standalone implementation/);
-      assert.equal((await readCapturedPhases(capturePath))[0], "standalone-implementer");
+      assert.doesNotMatch(result.stdout, /Reusing committed implementation/);
+      assert.equal((await readCapturedPhases(capturePath))[0], "implementer");
     });
 
     it("runs the spec implementer when a leftover child branch has no commits of its own and the base moved on", async () => {
@@ -2348,7 +2356,7 @@ fi
         (error) => error
       );
 
-      assert.match(result.stdout, /Selected issue #11/);
+      assert.match(result.stdout, /Selected child issue #11/);
       assert.doesNotMatch(result.stdout, /Reusing committed implementation/);
       assert.equal((await readCapturedPhases(capturePath))[0], "implementer");
     });
@@ -2426,7 +2434,7 @@ fi
 
       const result = await run(shim, [], { cwd: consumerRoot, env: environment });
 
-      assert.match(result.stdout, /Reusing committed standalone implementation/);
+      assert.match(result.stdout, /Reusing committed implementation/);
       assert.doesNotMatch(result.stdout, /is behind main/);
     });
   });

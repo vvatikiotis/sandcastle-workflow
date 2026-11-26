@@ -1,6 +1,8 @@
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { getErrorCode } from "./error-code.ts";
+
 const ignoreContents = [
   ".env",
   "sandcastle.env",
@@ -44,10 +46,6 @@ type InitializationResult = {
   preserved: readonly string[];
 };
 
-function hasErrorCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
-}
-
 async function createSandcastleDirectory(
   sandcastleRoot: string
 ): Promise<"created" | "preserved"> {
@@ -55,7 +53,7 @@ async function createSandcastleDirectory(
     await mkdir(sandcastleRoot, { mode: 0o700 });
     return "created";
   } catch (error) {
-    if (!hasErrorCode(error, "EEXIST")) {
+    if (getErrorCode(error) !== "EEXIST") {
       throw error;
     }
   }
@@ -83,7 +81,7 @@ async function createExclusiveFile(
     await writeFile(filePath, contents, { encoding: "utf8", flag: "wx" });
     return "created";
   } catch (error) {
-    if (hasErrorCode(error, "EEXIST")) {
+    if (getErrorCode(error) === "EEXIST") {
       return "preserved";
     }
     throw error;

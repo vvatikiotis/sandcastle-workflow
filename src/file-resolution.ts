@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, realpath, stat } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 export function isWithinDirectory(
@@ -36,4 +36,18 @@ export async function requireReadableRegularFile(
     });
   }
   return resolvedPath;
+}
+
+// Workflow State holds credentials and logs, so only the owner may read it.
+export async function requirePrivateDirectory(
+  directoryPath: string
+): Promise<void> {
+  await mkdir(directoryPath, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(directoryPath);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(
+      `Sandcastle private state path ${directoryPath} must be a real directory.`
+    );
+  }
+  await chmod(directoryPath, 0o700);
 }
