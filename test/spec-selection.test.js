@@ -166,7 +166,7 @@ describe("Sandcastle native sub-issue selection", () => {
       readyIssues: [
         {
           id: "150",
-          title: "Orphan",
+          title: "Standalone",
           createdAt: "2026-07-14T00:00:00Z",
           parentId: null,
         },
@@ -188,7 +188,7 @@ describe("Sandcastle native sub-issue selection", () => {
         readyIssues: [
           {
             id: "150",
-            title: "Orphan",
+            title: "Standalone",
             createdAt: "2026-07-14T00:00:00Z",
             parentId: null,
           },

@@ -9,7 +9,7 @@ Use this guide to turn a source change into a reviewed, locally vendored package
 - Consumer distribution: a reviewed `.tgz` committed under the consumer's `vendor/` directory
 - Publication to npm, workspace links, adjacent checkouts, and source-directory installation are unsupported
 
-The package owns executable code and read-only defaults. Consumers own configuration, credentials, project guidance, Dockerfile overrides, logs, worktrees, dependency overlays, locks, and recovery state. Preserve the GitHub-native control plane in [ADR-0001](docs/adr/0001-github-native-sandcastle-control-plane.md).
+The package owns executable code and read-only defaults. Consumers own configuration, credentials, project guidance, project overrides, logs, worktrees, dependency overlays, locks, and recovery state. Preserve the GitHub-native control plane in [ADR-0001](docs/adr/0001-github-native-sandcastle-control-plane.md).
 
 Implementer, reviewer, and merger phases must not modify any Consumer Repository file named `Dockerfile`. The runner enforces this after each agent finishes by comparing commits; merger commits are checked before they reach the base branch. A detected change must append a prominent error to that phase's log and abort before the next phase or base-branch update. Maintainers make and review Dockerfile changes outside agent runs, then rebuild the configured image.
 
@@ -19,6 +19,7 @@ Implementer, reviewer, and merger phases must not modify any Consumer Repository
 - pnpm 11.10.0, as declared in `package.json`
 - GitHub CLI for consumer-boundary fixtures and issue operations
 - Docker for the optional Docker regression
+- `script` (util-linux on Linux, the system `script` on macOS) for the packaged tests that answer the work-path question in a pseudo-terminal
 
 `GH_TOKEN` must contain a GitHub personal access token (PAT) with access to the Consumer Repository and these repository permissions:
 

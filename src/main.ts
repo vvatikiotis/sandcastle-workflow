@@ -1,21 +1,34 @@
-// Sequential selector → implementer → reviewer → merger workflow
+// Sequential selection → implementer → reviewer → merger → integration workflow
 //
-// This template drives a sequential workflow per issue:
-//   Selector:    reads GitHub native sub-issues and selects the earliest ready
-//                spec path or the standalone/orphan path chosen for the run.
-//   Implementer: works on the issue branch, commits the changes, and signals
-//                completion.
-//   Reviewer:    reviews the branch diff and either approves it or makes
-//                corrections directly on the branch.
-//   Merger:      merges the reviewed branch back to the current branch and
-//                closes the issue after a successful merge.
+// The runner, not an agent, owns the Control Plane decisions (ADR-0001) and
+// every base-branch update. Each issue moves through these steps in order:
+//   Selection:   the runner reads GitHub native sub-issues and blocking
+//                relationships. It follows the earliest ready Specification
+//                for the whole run, or the standalone path; the operator
+//                chooses when both have work. A Standalone Issue with an open
+//                blocker waits.
+//   Implementer: works on the issue branch and commits the change.
+//   Reviewer:    reviews the branch diff and either approves it or commits
+//                corrections on the branch.
+//   Merger:      rebases the reviewed branch onto the captured base in a
+//                separate verification worktree, verifies it, and commits any
+//                fix. It never updates the base branch or closes the issue.
+//   Integration: the runner checks that the base did not move and that the
+//                merger's commits change no Dockerfile, then fast-forwards the
+//                base branch with `git merge --ff-only`, closes the issue, and
+//                deletes the reviewed branch.
+// When every direct child of the selected Specification is closed, the final
+// spec reviewer reviews the integrated result and closes the Specification.
 //
 // The implementer and reviewer share a single sandbox created via
-// createSandbox(), so they work on the same explicit branch.
+// createSandbox(), so they work on the same explicit branch. The runner checks
+// each agent phase's commits for Dockerfile changes and aborts the run if any
+// changed.
 //
-// The outer loop repeats up to MAX_ITERATIONS times, processing one issue per
-// iteration and stopping early once the backlog is exhausted. This keeps the
-// workflow fully sequential.
+// A normal run holds the active-run lock and first recovers any interrupted
+// merger. The outer loop then repeats up to MAX_ITERATIONS times, integrating
+// at most one issue per iteration and stopping early when no eligible work
+// remains or a phase stops. This keeps the workflow fully sequential.
 //
 // Public entry point: sandcastle-workflow
 
@@ -496,7 +509,7 @@ if (command === "build-image") {
 
   console.log(`Docker image: ${dockerImageName}`);
   const dockerfileSource =
-    dockerfile.source === "built-in"
+    dockerfile.source === "packaged"
       ? chalk.blue(dockerfile.source)
       : dockerfile.source;
   console.log(`Dockerfile: ${dockerfile.path} (${dockerfileSource})`);
@@ -625,7 +638,7 @@ const optionalGuidance = await findOptionalProjectGuidance(projectRoot);
 const promptFiles = await resolvePromptFiles({ projectRoot, workflowRoot });
 for (const selection of promptFiles.selections) {
   console.log(
-    `Prompt ${selection.filename}: ${chalk.blue("built-in")} ${selection.path}`,
+    `Prompt ${selection.filename}: ${chalk.blue("packaged")} ${selection.path}`,
   );
   if (selection.guidancePath !== undefined) {
     console.log(
@@ -827,8 +840,8 @@ await validateEffectiveIgnoreBehavior();
 // region Runtime and Sandcastle setup
 //
 
-// Maximum number of implement→review cycles to run before stopping.
-// Each cycle works on one issue.
+// Maximum number of workflow iterations to run before stopping. Each
+// iteration integrates at most one issue or runs the final spec review.
 const MAX_ITERATIONS = maxIterations;
 
 // https://www.eddyvinck.com/blog/how-to-set-up-sandcastle-with-codex/
@@ -1042,8 +1055,10 @@ async function createLogPath(
 // region Git state and recovery
 //
 
-// Persists the base branch while merger mutates the bind-mounted checkout.
-// A later run uses it to recover from process termination before planning.
+// Persists the base branch, reviewed branch, and verification worktree from
+// merger setup until the runner has integrated and deleted the reviewed
+// branch. A later run uses it to recover from process termination before
+// planning.
 const mergerRecoveryPath = projectPath(".sandcastle", "merger-recovery.json");
 
 const mergerRecoverySchema = z.object({
@@ -1227,7 +1242,7 @@ async function removeVerificationWorktree(
   }
 
   console.warn(
-    `WARNING: Could not remove merger verification worktree. ${result.detail} Recovery marker: ${mergerRecoveryPath}. See .sandcastle/README.md for inspected manual recovery steps.`,
+    `WARNING: Could not remove merger verification worktree. ${result.detail} Recovery marker: ${mergerRecoveryPath}.`,
   );
   return false;
 }
@@ -1842,34 +1857,75 @@ async function runFinalSpecReview(
 
 type WorkPath = "spec" | "standalone";
 
-async function chooseWorkPath(): Promise<WorkPath> {
+type WorkPathChoice =
+  | { kind: "chosen"; workPath: WorkPath }
+  | { kind: "unanswered"; reason: string };
+
+async function chooseWorkPath(): Promise<WorkPathChoice> {
+  // Without a terminal nobody can answer, and the question would wait forever.
+  if (!process.stdin.isTTY) {
+    return { kind: "unanswered", reason: "stdin is not an interactive terminal" };
+  }
+
   const readline = createInterface({
     input: process.stdin,
     output: process.stdout,
   });
+  // A terminal in raw mode delivers Ctrl-C to readline instead of raising
+  // SIGINT, so forward it to keep the run's interrupt handling.
+  readline.on("SIGINT", () => {
+    process.kill(process.pid, "SIGINT");
+  });
+  // Not every way input can end settles a pending question, so the interface
+  // closing also ends the wait.
+  const closed = new Promise<undefined>((resolve) => {
+    readline.once("close", () => resolve(undefined));
+  });
 
   try {
     while (true) {
-      const answer = (
-        await readline.question(
-          "Ready spec work and standalone issues are available. Follow the spec path or the standalone/orphan path? [spec/orphan] ",
+      const asked = readline
+        .question(
+          "Ready spec work and standalone issues are available. Follow the spec path or the standalone path? [spec/standalone] ",
         )
-      )
-        .trim()
-        .toLowerCase();
-
-      if (answer === "spec") {
-        return "spec";
+        .catch((error: unknown) => {
+          // Ctrl-D closes the interface and rejects the question with an AbortError.
+          if (error instanceof Error && error.name === "AbortError") {
+            return undefined;
+          }
+          throw error;
+        });
+      const reply = await Promise.race([asked, closed]);
+      if (reply === undefined) {
+        return {
+          kind: "unanswered",
+          reason: "stdin closed before a work path was chosen",
+        };
       }
-      if (answer === "orphan" || answer === "standalone") {
-        return "standalone";
+
+      const answer = reply.trim().toLowerCase();
+      if (answer === "spec" || answer === "standalone") {
+        return { kind: "chosen", workPath: answer };
       }
 
-      console.warn('Please enter "spec" or "orphan".');
+      console.warn('Please enter "spec" or "standalone".');
     }
   } finally {
     readline.close();
   }
+}
+
+// Ends the run without starting work when the operator cannot choose a Work
+// Path. Status 2 marks it as a usage problem: rerun from a terminal.
+function stopForUnansweredWorkPath(reason: string): void {
+  console.error(
+    `ERROR: Both ready spec work and standalone issues are available, and choosing a work path needs an interactive terminal (${reason}). Run Sandcastle from a terminal to choose the spec path or the standalone path.`,
+  );
+  runEndStatus = {
+    kind: "stopped",
+    reason: "Choosing a work path needs an interactive terminal.",
+  };
+  process.exitCode = 2;
 }
 
 function printBlockedStandaloneIssues(
@@ -1934,7 +1990,7 @@ function printDryRun(
 
   if (workPath === "standalone") {
     console.log(
-      `\nSelected standalone/orphan path. Would implement standalone issue #${standaloneIssues[0].id} next.`,
+      `\nSelected standalone path. Would implement standalone issue #${standaloneIssues[0].id} next.`,
     );
     return;
   }
@@ -2496,7 +2552,8 @@ async function runStandaloneIssue(
 // 1. ready-for-agent includes parent specs and executable child issues
 // 2. implementer should not close the issue but comment on the work done
 // 3. reviewer is the quality gate
-// 4. merge is the completion gate and closes the issue after success
+// 4. merger verification is the completion gate; after it succeeds, the runner
+//    fast-forwards the base branch and closes the issue
 let runSpecIssueId: string | undefined;
 let workPath: WorkPath | undefined;
 let skippedStaleStandaloneSelection = false;
@@ -2570,7 +2627,12 @@ if (recoverySucceeded) {
         specCandidates.length > 0 &&
         standaloneIssues.length > 0
       ) {
-        workPath = await chooseWorkPath();
+        const choice = await chooseWorkPath();
+        if (choice.kind === "unanswered") {
+          stopForUnansweredWorkPath(choice.reason);
+          break;
+        }
+        workPath = choice.workPath;
       }
       printDryRun(
         specCandidates,
@@ -2609,7 +2671,12 @@ if (recoverySucceeded) {
       specCandidates.length > 0 &&
       standaloneIssues.length > 0
     ) {
-      workPath = await chooseWorkPath();
+      const choice = await chooseWorkPath();
+      if (choice.kind === "unanswered") {
+        stopForUnansweredWorkPath(choice.reason);
+        break;
+      }
+      workPath = choice.workPath;
     }
 
     //
@@ -2700,7 +2767,8 @@ if (recoverySucceeded) {
     // region Spec workflow
     //
     // The spec-child workflow is intentionally explicit and independent from
-    // the standalone workflow. See README.md for the workflow contract.
+    // the standalone workflow. ADR-0001 governs Specification selection and
+    // child eligibility.
 
     if (workPath === "spec" && specCandidates.length === 0) {
       const reason = "No open ready-for-agent spec issues were found.";
