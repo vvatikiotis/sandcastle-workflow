@@ -2,9 +2,9 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import chalk from "chalk";
 import { open } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
+import { formatAgentFailure, type AgentLogin } from "./agent-login.ts";
 import { formatAgentStartMessage } from "./agent-run-status.ts";
 import { requirePrivateDirectory } from "./file-resolution.ts";
 import {
@@ -14,6 +14,7 @@ import {
   type NodeModulesOverlay,
 } from "./node-modules-overlay.ts";
 import { runAgentPhase, type AgentPhaseResult } from "./phase-diagnostics.ts";
+import { formatDiagnostic } from "./run-completion.ts";
 import type { Exec } from "./run-context.ts";
 import type { AgentEnvironment, AgentRoleConfig } from "./runner-config.ts";
 
@@ -63,12 +64,72 @@ export type AgentRuntime = {
   ) => Promise<SandboxResult<T>>;
 };
 
+type SandboxCommand = { command: string };
+
+type SandboxMount = { hostPath: string; sandboxPath: string; readonly: boolean };
+
+// What one agent login adds to every sandbox: a read-only mount of the host
+// login, a hook that copies it into the sandbox home, and environment.
+type SandboxLoginSetup = {
+  mount?: SandboxMount;
+  hook?: SandboxCommand;
+  env: Record<string, string>;
+};
+
+// Sandboxes need the host logins, but must not mutate them, so each is mounted
+// read-only and the agent works on a copy.
+// https://www.eddyvinck.com/blog/how-to-set-up-sandcastle-with-codex/
+function getSandboxLoginSetup(login: AgentLogin): SandboxLoginSetup {
+  switch (login.agent) {
+    case "codex": {
+      const mount = "/mnt/host-codex";
+      const codexHome = "/home/agent/.codex";
+      return {
+        mount: { hostPath: login.codexHome, sandboxPath: mount, readonly: true },
+        hook: {
+          command: [
+            `mkdir -p "${codexHome}"`,
+            `test -f "${mount}/auth.json"`,
+            `cp "${mount}/auth.json" "${codexHome}/auth.json"`,
+            `if [ -f "${mount}/config.toml" ]; then cp "${mount}/config.toml" "${codexHome}/config.toml"; fi`,
+          ].join(" && "),
+        },
+        env: { CODEX_HOME: codexHome },
+      };
+    }
+    case "claude-code": {
+      if (login.method === "oauth-token") {
+        return { env: { CLAUDE_CODE_OAUTH_TOKEN: login.token } };
+      }
+      const mount = "/mnt/host-claude";
+      // Sandcastle captures Claude sessions from the sandbox home's .claude.
+      const claudeHome = "/home/agent/.claude";
+      return {
+        mount: {
+          hostPath: login.claudeHome,
+          sandboxPath: mount,
+          readonly: true,
+        },
+        hook: {
+          command: [
+            `mkdir -p "${claudeHome}"`,
+            `test -f "${mount}/.credentials.json"`,
+            `cp "${mount}/.credentials.json" "${claudeHome}/.credentials.json"`,
+          ].join(" && "),
+        },
+        env: {},
+      };
+    }
+  }
+}
+
 export function createAgentRuntime({
   projectRoot,
   execFile,
   dockerImageName,
   installCommand,
   agentEnvironment,
+  agentLogins,
 }: {
   projectRoot: string;
   execFile: Exec;
@@ -76,45 +137,40 @@ export function createAgentRuntime({
   installCommand: readonly string[];
   // Empty for a dry run, which never launches agents.
   agentEnvironment: Partial<AgentEnvironment>;
+  // One per agent the config uses; empty for a dry run.
+  agentLogins: readonly AgentLogin[];
 }): AgentRuntime {
-  // https://www.eddyvinck.com/blog/how-to-set-up-sandcastle-with-codex/
-  const hostCodexHome = path.join(os.homedir(), ".codex");
-  const sandboxCodexMount = "/mnt/host-codex";
-  const sandboxCodexHome = "/home/agent/.codex";
+  const loginSetups = agentLogins.map(getSandboxLoginSetup);
 
-  // Sandboxes need the host Codex credentials, but must not mutate them.
-  const authHook = {
-    command: [
-      `mkdir -p "${sandboxCodexHome}"`,
-      `test -f "${sandboxCodexMount}/auth.json"`,
-      `cp "${sandboxCodexMount}/auth.json" "${sandboxCodexHome}/auth.json"`,
-      `if [ -f "${sandboxCodexMount}/config.toml" ]; then cp "${sandboxCodexMount}/config.toml" "${sandboxCodexHome}/config.toml"; fi`,
-    ].join(" && "),
-  };
-
-  // Hooks run inside the sandbox before the agent starts each iteration.
+  // Hooks run inside the sandbox before the agent starts each iteration. The
+  // install command stays last so the login copies are in place first.
   const dependencyHooks = {
     sandbox: {
-      onSandboxReady: [authHook, { command: installCommand.join(" ") }],
+      onSandboxReady: [
+        ...loginSetups.flatMap((setup) => (setup.hook ? [setup.hook] : [])),
+        { command: installCommand.join(" ") },
+      ],
     },
   };
 
-  const mounts = [
-    {
-      hostPath: hostCodexHome,
-      sandboxPath: sandboxCodexMount,
-      readonly: true,
-    },
-  ];
+  const mounts = loginSetups.flatMap((setup) =>
+    setup.mount ? [setup.mount] : [],
+  );
   const nodeModulesOverlayRoot = path.join(
     projectRoot,
     ".sandcastle",
     "node-modules-overlays",
   );
 
+  // CLAUDE_CODE_OAUTH_TOKEN reaches the sandbox only through its Claude Code
+  // login, so a config without Claude Code never forwards it.
   const env = {
-    ...agentEnvironment,
-    CODEX_HOME: sandboxCodexHome,
+    ...(agentEnvironment.GH_TOKEN === undefined
+      ? {}
+      : { GH_TOKEN: agentEnvironment.GH_TOKEN }),
+    ...Object.fromEntries(
+      loginSetups.flatMap((setup) => Object.entries(setup.env)),
+    ),
     CI: "true",
     PNPM_CONFIG_CONFIRM_MODULES_PURGE: "false",
   };
@@ -149,11 +205,17 @@ export function createAgentRuntime({
   function createConfiguredAgent(
     config: AgentRoleConfig,
   ): ReturnType<typeof sandcastle.codex> {
-    // Sandcastle forwards effort to Codex at runtime, but its type lists only
-    // currently known values. Let the provider validate future model/effort pairs.
-    return sandcastle.codex(config.model, {
-      effort: config.effort as SandcastleCodexEffort,
-    });
+    switch (config.agent) {
+      case "codex":
+        // Sandcastle forwards effort to Codex at runtime, but its type lists
+        // only currently known values. Let the provider validate future
+        // model/effort pairs.
+        return sandcastle.codex(config.model, {
+          effort: config.effort as SandcastleCodexEffort,
+        });
+      case "claude-code":
+        return sandcastle.claudeCode(config.model, { effort: config.effort });
+    }
   }
 
   let announcedAgentCount = 0;
@@ -208,15 +270,28 @@ export function createAgentRuntime({
       context: run.context,
       logPath: run.logPath,
       allowedOutcomes: run.allowedOutcomes,
-      run: () =>
-        sandbox.run({
-          name: runName,
-          maxIterations: 1,
-          agent: createConfiguredAgent(run.roleConfig),
-          promptFile: run.promptFile,
-          promptArgs: run.promptArgs,
-          logging,
-        }),
+      run: async () => {
+        try {
+          return await sandbox.run({
+            name: runName,
+            maxIterations: 1,
+            agent: createConfiguredAgent(run.roleConfig),
+            promptFile: run.promptFile,
+            promptArgs: run.promptArgs,
+            logging,
+          });
+        } catch (error) {
+          throw new Error(
+            formatAgentFailure({
+              role: run.phase,
+              agent: run.roleConfig.agent,
+              cause:
+                error instanceof Error ? error.message : formatDiagnostic(error),
+            }),
+            { cause: error },
+          );
+        }
+      },
     });
   }
 

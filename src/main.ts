@@ -42,6 +42,7 @@
 
 import chalk from "chalk";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,7 +69,9 @@ import {
   loadAgentEnvironment,
   loadRunnerConfig,
   requireMaxIterations,
+  type AgentEnvironment,
 } from "./runner-config.ts";
+import { resolveAgentLogins, type AgentLogin } from "./agent-login.ts";
 import {
   discoverProjectRoot,
   requireProjectSandcastleDirectory,
@@ -376,7 +379,18 @@ if (!optionalGuidance.agentInstructions) {
   console.log("Info: No AGENTS.md found.");
 }
 
-const agentEnvironment = isDryRun ? {} : await loadAgentEnvironment(projectRoot);
+// A dry run launches no agents, so it needs neither credentials nor logins.
+let agentEnvironment: Partial<AgentEnvironment> = {};
+let agentLogins: readonly AgentLogin[] = [];
+if (!isDryRun) {
+  const loadedEnvironment = await loadAgentEnvironment(projectRoot);
+  agentEnvironment = loadedEnvironment;
+  agentLogins = await resolveAgentLogins({
+    agentConfig: AGENT_CONFIG,
+    agentEnvironment: loadedEnvironment,
+    homeDirectory: os.homedir(),
+  });
+}
 
 //
 // endregion Agent and prompt preflight
@@ -406,6 +420,7 @@ const runtime = createAgentRuntime({
   dockerImageName,
   installCommand: packageManager.commands.install,
   agentEnvironment,
+  agentLogins,
 });
 
 const runContext: RunContext = {

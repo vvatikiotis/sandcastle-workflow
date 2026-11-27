@@ -1,6 +1,6 @@
 # Sandcastle Workflow
 
-A private, independently versioned workflow package that executes GitHub-native issue work through Docker-backed Codex agents. GitHub issue state and native relationships form its deterministic control plane.
+A private, independently versioned workflow package that executes GitHub-native issue work through Docker-backed Codex or Claude Code agents, chosen per role. GitHub issue state and native relationships form its deterministic control plane.
 
 Consumers install a reviewed local npm tarball. The package is not published to a registry and exposes no supported JavaScript or TypeScript import interface.
 

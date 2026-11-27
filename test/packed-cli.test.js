@@ -33,19 +33,55 @@ const ansi = {
   resetForeground: "\u001b[39m",
 };
 const validRunnerConfig = [
+  "IMPLEMENTER_AGENT=codex",
   "IMPLEMENTER_MODEL=test-model",
   "IMPLEMENTER_EFFORT=low",
+  "REVIEWER_AGENT=codex",
   "REVIEWER_MODEL=test-model",
   "REVIEWER_EFFORT=low",
+  "REPORTER_AGENT=codex",
   "REPORTER_MODEL=test-model",
   "REPORTER_EFFORT=low",
+  "FINAL_SPEC_REVIEWER_AGENT=codex",
   "FINAL_SPEC_REVIEWER_MODEL=test-model",
   "FINAL_SPEC_REVIEWER_EFFORT=low",
   "MAX_ITERATIONS=1",
 ].join("\n");
 
+// The valid runner configuration with the given roles, keyed by key prefix
+// such as IMPLEMENTER, switched to another agent.
+function runnerConfigWithAgents(agents) {
+  let config = validRunnerConfig;
+  for (const [prefix, agent] of Object.entries(agents)) {
+    config = config.replace(`${prefix}_AGENT=codex`, `${prefix}_AGENT=${agent}`);
+  }
+  return `${config}\n`;
+}
+
+const allRolesOnClaudeCode = {
+  IMPLEMENTER: "claude-code",
+  REVIEWER: "claude-code",
+  REPORTER: "claude-code",
+  FINAL_SPEC_REVIEWER: "claude-code",
+};
+
 let tempRoot;
 let tarballPath;
+
+// A host home directory holding the chosen agent logins. The runner reads
+// agent logins beneath the home directory, so workflow runs point HOME here.
+async function createAgentHome({ codex = false, claude = false } = {}) {
+  const home = await mkdtemp(path.join(tempRoot, "home-"));
+  if (codex) {
+    await mkdir(path.join(home, ".codex"));
+    await writeFile(path.join(home, ".codex", "auth.json"), '{"fake":"codex"}\n');
+  }
+  if (claude) {
+    await mkdir(path.join(home, ".claude"));
+    await writeFile(path.join(home, ".claude", ".credentials.json"), '{"fake":"claude"}\n');
+  }
+  return home;
+}
 
 async function run(file, args, options = {}) {
   return execFileAsync(file, args, {
@@ -302,9 +338,11 @@ async function prepareWorkflowConsumer(manager, fixture) {
   const environment = {
     ...process.env,
     FAKE_SANDCASTLE_CAPTURE: capturePath,
+    HOME: await createAgentHome({ codex: true }),
     NODE_OPTIONS: `--import=${hookPath}`,
     PATH: `${binRoot}:${process.env.PATH ?? ""}`,
   };
+  delete environment.CLAUDE_CODE_OAUTH_TOKEN;
   return { ...prepared, environment, capturePath, fixturePath };
 }
 
@@ -575,7 +613,31 @@ describe("packed CLI", () => {
 
     const sandcastleRoot = path.join(consumerRoot, ".sandcastle");
     const examplePath = path.join(sandcastleRoot, "sandcastle.env.example");
-    assert.match(await readFile(examplePath, "utf8"), /IMPLEMENTER_MODEL=/);
+    const runnerExample = await readFile(examplePath, "utf8");
+    // Every key comes with a comment that gives an example value.
+    const assertDocumented = (contents, key, allowed) => {
+      assert.match(contents, new RegExp(`^${key}=$`, "m"), `${key} is not listed`);
+      assert.match(
+        contents,
+        new RegExp(`^# .*${allowed}.*Example: ${key}=\\S+.*\\n${key}=$`, "m"),
+        `${key} has no comment with its allowed values and an example`
+      );
+    };
+    for (const prefix of ["IMPLEMENTER", "REVIEWER", "REPORTER", "FINAL_SPEC_REVIEWER"]) {
+      assertDocumented(runnerExample, `${prefix}_AGENT`, "codex or claude-code");
+      assertDocumented(runnerExample, `${prefix}_MODEL`, "model");
+      assertDocumented(runnerExample, `${prefix}_EFFORT`, "low, medium, high, xhigh, or max");
+    }
+    assertDocumented(runnerExample, "MAX_ITERATIONS", "positive integer");
+    assert.match(runnerExample, /^# .*image.*\n# .*Example: DOCKER_IMAGE=\S+\n# DOCKER_IMAGE=$/m);
+    const agentEnvironmentExample = await readFile(
+      path.join(sandcastleRoot, ".env.example"),
+      "utf8"
+    );
+    assertDocumented(agentEnvironmentExample, "GH_TOKEN", "");
+    assertDocumented(agentEnvironmentExample, "CLAUDE_CODE_OAUTH_TOKEN", "");
+    assert.match(agentEnvironmentExample, /claude setup-token/);
+    assert.match(agentEnvironmentExample, /macOS/);
     assert.match(
       await readFile(path.join(sandcastleRoot, ".gitignore"), "utf8"),
       /^run\.lock$/m
@@ -1286,6 +1348,7 @@ fi
       const environment = {
         ...process.env,
         FAKE_SANDCASTLE_CAPTURE: capturePath,
+        HOME: await createAgentHome({ codex: true }),
         ISSUE_STATE: issueStatePath,
         NODE_OPTIONS: `--import=${hookPath}`,
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
@@ -1304,7 +1367,10 @@ fi
         (error) => {
           assert.equal(error.code, 1);
           assert.match(error.stderr, /unsupported agent environment key DATABASE_PASSWORD/);
-          assert.match(error.stderr, /Only GH_TOKEN is supported/);
+          assert.match(
+            error.stderr,
+            /Only GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN are supported/
+          );
           return true;
         }
       );
@@ -1494,6 +1560,7 @@ fi
       env: {
         ...process.env,
         FAKE_SANDCASTLE_CAPTURE: capturePath,
+        HOME: await createAgentHome({ codex: true }),
         ISSUE_STATE: issueStatePath,
         NODE_OPTIONS: `--import=${hookPath}`,
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
@@ -1572,6 +1639,7 @@ fi
       env: {
         ...process.env,
         FAKE_SANDCASTLE_CAPTURE: capturePath,
+        HOME: await createAgentHome({ codex: true }),
         ISSUE_STATE: issueStatePath,
         NODE_OPTIONS: `--import=${hookPath}`,
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
@@ -1690,6 +1758,26 @@ fi
           contents: validConfig.replace("REPORTER_MODEL=test-model\n", ""),
           diagnostic: /missing required configuration: REPORTER_MODEL/,
         },
+        {
+          contents: validConfig.replace("IMPLEMENTER_AGENT=codex\n", ""),
+          diagnostic: /missing required configuration: IMPLEMENTER_AGENT\./,
+        },
+        {
+          contents: validConfig.replace("REVIEWER_AGENT=codex", "REVIEWER_AGENT="),
+          diagnostic: /sandcastle\.env:4: REVIEWER_AGENT must not be empty/,
+        },
+        {
+          contents: validConfig.replace("REPORTER_AGENT=codex", "REPORTER_AGENT=claude"),
+          diagnostic:
+            /sandcastle\.env:7: REPORTER_AGENT must be one of codex, claude-code\./,
+        },
+        {
+          contents: validConfig
+            .replace("FINAL_SPEC_REVIEWER_AGENT=codex", "FINAL_SPEC_REVIEWER_AGENT=claude-code")
+            .replace("FINAL_SPEC_REVIEWER_EFFORT=low", "FINAL_SPEC_REVIEWER_EFFORT=minimal"),
+          diagnostic:
+            /sandcastle\.env:12: FINAL_SPEC_REVIEWER_EFFORT must be one of low, medium, high, xhigh, max when FINAL_SPEC_REVIEWER_AGENT is claude-code\./,
+        },
       ];
 
       for (const { contents, diagnostic } of cases) {
@@ -1701,6 +1789,25 @@ fi
         assert.equal(error.code, 1);
         assert.match(error.stderr, diagnostic);
         assert.doesNotMatch(error.stdout, /=== Sandcastle dry run ===/);
+      }
+
+      // Codex effort stays unchecked; every Claude Code effort is accepted.
+      const accepted = [
+        validConfig.replace("IMPLEMENTER_EFFORT=low", "IMPLEMENTER_EFFORT=minimal"),
+        ...["low", "medium", "high", "xhigh", "max"].map((effort) =>
+          runnerConfigWithAgents({ REVIEWER: "claude-code" }).replace(
+            "REVIEWER_EFFORT=low",
+            `REVIEWER_EFFORT=${effort}`
+          )
+        ),
+      ];
+      for (const contents of accepted) {
+        await writeFile(configPath, contents);
+        const result = await run(shim, ["--dry-run"], {
+          cwd: consumerRoot,
+          env: environment,
+        });
+        assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
       }
 
       await rm(configPath);
@@ -1837,6 +1944,265 @@ fi
         /Git ignore rules cannot protect tracked Sandcastle paths: \.sandcastle\/\.env/
       );
     });
+  });
+
+  describe("agent choice", () => {
+    const oneStandaloneIssue = { readyIssueLists: [[standaloneIssue("42")]] };
+
+    async function readCaptures(capturePath) {
+      return (await readFile(capturePath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    }
+
+    // Prepares a consumer whose roles run the given agents and whose host
+    // home holds the given logins.
+    async function prepareAgentConsumer(manager, { agents = {}, logins }) {
+      const prepared = await prepareWorkflowConsumer(manager, oneStandaloneIssue);
+      await writeFile(
+        path.join(prepared.consumerRoot, ".sandcastle", "sandcastle.env"),
+        runnerConfigWithAgents(agents)
+      );
+      const environment = { ...prepared.environment, HOME: await createAgentHome(logins) };
+      return { ...prepared, environment };
+    }
+
+    it("runs each role with its configured agent, model, and effort", async () => {
+      const { consumerRoot, shim, environment, capturePath } = await prepareAgentConsumer(
+        "pnpm-agent-mixed",
+        { agents: { IMPLEMENTER: "claude-code" }, logins: { codex: true, claude: true } }
+      );
+      const configPath = path.join(consumerRoot, ".sandcastle", "sandcastle.env");
+      await writeFile(
+        configPath,
+        (await readFile(configPath, "utf8"))
+          .replace("IMPLEMENTER_MODEL=test-model", "IMPLEMENTER_MODEL=claude-test-model")
+          .replace("IMPLEMENTER_EFFORT=low", "IMPLEMENTER_EFFORT=xhigh")
+      );
+
+      const result = await run(shim, [], { cwd: consumerRoot, env: environment });
+
+      assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+      const captures = await readCaptures(capturePath);
+      const agents = Object.fromEntries(
+        captures
+          .filter((entry) => entry.type === "phase")
+          .map((entry) => [entry.name.split(":")[0], entry.agent])
+      );
+      assert.deepEqual(agents, {
+        implementer: {
+          provider: "claude-code",
+          model: "claude-test-model",
+          options: { effort: "xhigh" },
+        },
+        reviewer: { provider: "codex", model: "test-model", options: { effort: "low" } },
+      });
+      // Both agents share the issue sandbox, so it carries both logins.
+      const sandbox = captures.find((entry) => entry.type === "sandbox");
+      assert.deepEqual(
+        sandbox.mounts
+          .filter((mount) => mount.readonly)
+          .map((mount) => mount.sandboxPath)
+          .sort(),
+        ["/mnt/host-claude", "/mnt/host-codex"]
+      );
+      const hooks = sandbox.hooks.sandbox.onSandboxReady.map((hook) => hook.command);
+      assert.equal(hooks.length, 3);
+      assert.ok(hooks.some((hook) => /cp "\/mnt\/host-codex\/auth\.json"/.test(hook)));
+      assert.ok(
+        hooks.some((hook) =>
+          /cp "\/mnt\/host-claude\/\.credentials\.json" "\/home\/agent\/\.claude\/\.credentials\.json"/.test(hook)
+        )
+      );
+      assert.equal(hooks.at(-1), "pnpm install --frozen-lockfile");
+    });
+
+    it("runs a Codex-only config without ~/.claude and never forwards the Claude Code token", async () => {
+      const { consumerRoot, shim, environment, capturePath } = await prepareAgentConsumer(
+        "pnpm-agent-codex-only",
+        { logins: { codex: true } }
+      );
+
+      const result = await run(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, CLAUDE_CODE_OAUTH_TOKEN: "unused-token" },
+      });
+
+      assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+      const sandbox = (await readCaptures(capturePath)).find((entry) => entry.type === "sandbox");
+      assert.deepEqual(
+        sandbox.mounts.filter((mount) => mount.readonly).map((mount) => mount.hostPath),
+        [path.join(environment.HOME, ".codex")]
+      );
+      assert.equal(sandbox.env.CODEX_HOME, "/home/agent/.codex");
+      assert.equal("CLAUDE_CODE_OAUTH_TOKEN" in sandbox.env, false);
+      assert.equal(
+        sandbox.hooks.sandbox.onSandboxReady.some((hook) => hook.command.includes(".claude")),
+        false
+      );
+    });
+
+    it("runs a Claude-only config without ~/.codex", async () => {
+      const { consumerRoot, shim, environment, capturePath } = await prepareAgentConsumer(
+        "pnpm-agent-claude-only",
+        { agents: allRolesOnClaudeCode, logins: { claude: true } }
+      );
+
+      const result = await run(shim, [], { cwd: consumerRoot, env: environment });
+
+      assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
+      const captures = await readCaptures(capturePath);
+      assert.equal(
+        captures
+          .filter((entry) => entry.type === "phase")
+          .every((entry) => entry.agent.provider === "claude-code"),
+        true
+      );
+      const sandbox = captures.find((entry) => entry.type === "sandbox");
+      assert.deepEqual(
+        sandbox.mounts.filter((mount) => mount.readonly),
+        [
+          {
+            hostPath: path.join(environment.HOME, ".claude"),
+            sandboxPath: "/mnt/host-claude",
+            readonly: true,
+          },
+        ]
+      );
+      assert.equal("CODEX_HOME" in sandbox.env, false);
+      assert.equal(
+        sandbox.hooks.sandbox.onSandboxReady.some((hook) => hook.command.includes("codex")),
+        false
+      );
+    });
+
+    it("stops before any sandbox starts when an agent in use has no login, except in a dry run", async () => {
+      const { consumerRoot, shim, environment, capturePath, fixturePath } =
+        await prepareAgentConsumer("pnpm-agent-missing-login", {
+          agents: { REVIEWER: "claude-code", REPORTER: "claude-code" },
+          logins: {},
+        });
+
+      const dryRun = await run(shim, ["--dry-run"], { cwd: consumerRoot, env: environment });
+      assert.match(dryRun.stdout, /SANDCASTLE RUN: COMPLETED/);
+
+      const bothMissing = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+      assert.equal(bothMissing.code, 1);
+      assert.match(
+        bothMissing.stderr,
+        /Codex \(codex\) has no login for the Implementer and Final Spec Reviewer: .*\.codex\/auth\.json is not a readable file\. Run `codex login`/
+      );
+      assert.match(
+        bothMissing.stderr,
+        /Claude Code \(claude-code\) has no login for the Reviewer and Reporter: CLAUDE_CODE_OAUTH_TOKEN is not set .*\.claude\/\.credentials\.json is not a readable file\. Run `claude setup-token`.*on macOS/
+      );
+
+      await mkdir(path.join(environment.HOME, ".codex"));
+      await writeFile(path.join(environment.HOME, ".codex", "auth.json"), "{}\n");
+      const claudeMissing = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: environment,
+      });
+      assert.equal(claudeMissing.code, 1);
+      assert.match(claudeMissing.stderr, /Claude Code \(claude-code\) has no login/);
+      assert.doesNotMatch(claudeMissing.stderr, /Codex \(codex\) has no login/);
+
+      // No sandbox started, so the fake recorded nothing.
+      await assert.rejects(access(capturePath));
+      assert.deepEqual(await readClosedIssues(fixturePath), []);
+    });
+
+    it("prefers CLAUDE_CODE_OAUTH_TOKEN over the ~/.claude login, from the file or else the host", async () => {
+      const { consumerRoot, shim, environment, capturePath } = await prepareAgentConsumer(
+        "pnpm-agent-token",
+        { agents: allRolesOnClaudeCode, logins: { claude: true } }
+      );
+      const agentEnvironmentPath = path.join(consumerRoot, ".sandcastle", ".env");
+
+      await writeFile(agentEnvironmentPath, "GH_TOKEN=test-token\nCLAUDE_CODE_OAUTH_TOKEN=claude-file-secret\n");
+      const fromFile = await run(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, CLAUDE_CODE_OAUTH_TOKEN: "claude-host-secret" },
+      });
+      assert.match(fromFile.stdout, /SANDCASTLE RUN: COMPLETED/);
+      const fileSandbox = (await readCaptures(capturePath)).find((entry) => entry.type === "sandbox");
+      assert.equal(fileSandbox.env.CLAUDE_CODE_OAUTH_TOKEN, "claude-file-secret");
+      assert.equal(fileSandbox.mounts.some((mount) => mount.readonly), false);
+      assert.deepEqual(
+        fileSandbox.hooks.sandbox.onSandboxReady.map((hook) => hook.command),
+        ["pnpm install --frozen-lockfile"]
+      );
+
+      // Without ~/.claude, a host token alone is a login.
+      const hostOnly = await prepareAgentConsumer("pnpm-agent-host-token", {
+        agents: allRolesOnClaudeCode,
+        logins: {},
+      });
+      await writeFile(
+        path.join(hostOnly.consumerRoot, ".sandcastle", ".env"),
+        "GH_TOKEN=test-token\nCLAUDE_CODE_OAUTH_TOKEN=\n"
+      );
+      const fromHost = await run(hostOnly.shim, [], {
+        cwd: hostOnly.consumerRoot,
+        env: { ...hostOnly.environment, CLAUDE_CODE_OAUTH_TOKEN: "claude-host-secret" },
+      });
+      assert.match(fromHost.stdout, /SANDCASTLE RUN: COMPLETED/);
+      const hostSandbox = (await readCaptures(hostOnly.capturePath)).find(
+        (entry) => entry.type === "sandbox"
+      );
+      assert.equal(hostSandbox.env.CLAUDE_CODE_OAUTH_TOKEN, "claude-host-secret");
+      for (const result of [fromFile, fromHost]) {
+        assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /claude-file-secret|claude-host-secret/);
+      }
+    });
+
+    for (const { role, agent, agentName, command, agents, login } of [
+      {
+        role: "Implementer",
+        agent: "claude-code",
+        agentName: "Claude Code",
+        command: "claude",
+        agents: { IMPLEMENTER: "claude-code" },
+        login: /claude setup-token/,
+      },
+      {
+        role: "Reviewer",
+        agent: "codex",
+        agentName: "Codex",
+        command: "codex",
+        agents: {},
+        login: /codex login/,
+      },
+    ]) {
+      it(`ends the run with status 1 when ${agentName} cannot start for the ${role}`, async () => {
+        const { consumerRoot, shim, environment, fixturePath } = await prepareAgentConsumer(
+          `pnpm-agent-start-${agent}`,
+          { agents, logins: { codex: true, claude: true } }
+        );
+
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: {
+            ...environment,
+            FAKE_AGENT_START_FAILURE: `${role.toLowerCase()}:${command}`,
+          },
+        });
+
+        assert.equal(error.code, 1);
+        const escape = (text) => text.replace(/[()]/g, "\\$&");
+        assert.match(
+          error.stderr,
+          new RegExp(`The ${role} could not run ${escape(`${agentName} (${agent})`)}\\. Check that the Docker image provides the \`${command}\` command`)
+        );
+        assert.match(error.stderr, login);
+        assert.match(error.stderr, new RegExp(`Cause: ${agent} exited with code 127`));
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
+      });
+    }
   });
 
   describe("standalone selection", () => {
