@@ -220,3 +220,13 @@ export function getBlockedReadyChildren(
       child.status === "ready-for-agent" && !eligibleChildIds.has(child.id)
   );
 }
+
+// Children neither closed nor ready-for-agent, for example needs-info. While
+// any remain, the Specification can neither progress nor get its final review.
+export function getUnresolvedChildren(
+  children: readonly SpecChild[]
+): SpecChild[] {
+  return children.filter(
+    (child) => child.status !== "closed" && child.status !== "ready-for-agent"
+  );
+}

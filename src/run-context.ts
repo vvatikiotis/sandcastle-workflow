@@ -26,9 +26,8 @@ export type RunContext = {
   projectRoot: string;
   agentConfig: AgentConfig;
   promptFiles: PromptFiles;
-  // INSTALL_COMMAND, TYPECHECK_COMMAND, and TEST_COMMAND for agent prompts.
-  verificationPromptArgs: Record<string, string>;
-  // The same commands, which Integration runs on the rebased issue branch.
+  // Integration runs these on the rebased issue branch; agent prompts name
+  // them as INSTALL_COMMAND, TYPECHECK_COMMAND, and TEST_COMMAND.
   verificationCommands: VerificationCommands;
   git: GitState;
   controlPlane: ControlPlane;

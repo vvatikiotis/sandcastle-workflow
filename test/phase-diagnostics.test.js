@@ -37,18 +37,18 @@ describe("phase diagnostics", () => {
 
   it("includes available agent detail, context, and log path for malformed output", () => {
     const diagnostic = formatPhaseExecutionError({
-      phase: "Merger",
+      phase: "Reporter",
       context: "issue #42",
       detail: "Rebase failed; git rebase exited 1; resolve the conflict.",
-      logPath: "merger.log",
+      logPath: "reporter.log",
       error: new Error("missing phase outcome"),
     });
 
-    assert.match(diagnostic, /Merger/);
+    assert.match(diagnostic, /Reporter/);
     assert.match(diagnostic, /issue #42/);
     assert.match(diagnostic, /Rebase failed/);
     assert.match(diagnostic, /missing phase outcome/);
-    assert.match(diagnostic, /merger.log/);
+    assert.match(diagnostic, /reporter.log/);
   });
 
   it("preserves available agent detail when phase output has no valid outcome", async () => {

@@ -15,6 +15,7 @@ import type { RunContext } from "./run-context.ts";
 import {
   getBlockedReadyChildren,
   getEligibleChildren,
+  getUnresolvedChildren,
   selectRunSpec,
 } from "./spec-selection.ts";
 import {
@@ -93,6 +94,111 @@ function stopForUnansweredWorkPath(reason: string): RunEndStatus {
   };
 }
 
+// Asks the operator for a Work Path when both paths have work and none was
+// chosen earlier in the run; otherwise keeps the current one.
+async function resolveWorkPath(
+  current: WorkPath | undefined,
+  { candidates, standaloneIssues }: WorkCandidates,
+): Promise<
+  | { kind: "resolved"; workPath: WorkPath | undefined }
+  | { kind: "ended"; status: RunEndStatus }
+> {
+  if (
+    current !== undefined ||
+    candidates.length === 0 ||
+    standaloneIssues.length === 0
+  ) {
+    return { kind: "resolved", workPath: current };
+  }
+
+  const choice = await chooseWorkPath();
+  return choice.kind === "chosen"
+    ? { kind: "resolved", workPath: choice.workPath }
+    : { kind: "ended", status: stopForUnansweredWorkPath(choice.reason) };
+}
+
+async function requireSafeBaseCheckout(
+  context: RunContext,
+): Promise<RunEndStatus | undefined> {
+  if (await context.git.hasSafeWorkingTree()) {
+    return undefined;
+  }
+  process.exitCode = 1;
+  return {
+    kind: "aborted",
+    reason: "The base checkout has tracked working-tree changes.",
+  };
+}
+
+// Reads the work graph. An invalid graph ends the run as stopped; any other
+// failure propagates.
+async function planWork(
+  context: RunContext,
+): Promise<
+  | { kind: "planned"; workCandidates: WorkCandidates }
+  | { kind: "ended"; status: RunEndStatus }
+> {
+  try {
+    return {
+      kind: "planned",
+      workCandidates: await context.controlPlane.getWorkCandidates(),
+    };
+  } catch (error) {
+    const planningStatus = classifyPlanningError(error);
+    if (!planningStatus) {
+      throw error;
+    }
+    console.warn(`WARNING: ${formatDiagnostic(error)}`);
+    return { kind: "ended", status: planningStatus };
+  }
+}
+
+// Plans once and prints what a normal run would do, without starting agents.
+async function runDryRun(
+  context: RunContext,
+  maxIterations: number,
+): Promise<RunEndStatus> {
+  console.log(`\n\nMax iterations: ${maxIterations}`);
+
+  const unsafeCheckout = await requireSafeBaseCheckout(context);
+  if (unsafeCheckout !== undefined) {
+    return unsafeCheckout;
+  }
+
+  const plan = await planWork(context);
+  if (plan.kind === "ended") {
+    return plan.status;
+  }
+  const { workCandidates } = plan;
+  const { errors } = workCandidates;
+
+  let workPath: WorkPath | undefined;
+  if (errors.length === 0) {
+    const resolution = await resolveWorkPath(undefined, workCandidates);
+    if (resolution.kind === "ended") {
+      return resolution.status;
+    }
+    workPath = resolution.workPath;
+  }
+
+  printDryRun({
+    specCandidates: workCandidates.candidates,
+    standaloneIssues: workCandidates.standaloneIssues,
+    blockedStandaloneIssues: workCandidates.blockedStandaloneIssues,
+    errors,
+    workPath,
+  });
+  return errors.length === 0
+    ? {
+        kind: "completed",
+        reason: "Dry run completed without starting any agents.",
+      }
+    : {
+        kind: "stopped",
+        reason: "Dry run found invalid GitHub native sub-issue relationships.",
+      };
+}
+
 // NOTE:
 // 1. ready-for-agent includes parent specs and executable child issues
 // 2. implementer should not close the issue but comment on the work done
@@ -104,46 +210,34 @@ export async function runWorkflow(
   context: RunContext,
   { isDryRun, maxIterations }: { isDryRun: boolean; maxIterations: number },
 ): Promise<RunEndStatus> {
-  const { git, controlPlane } = context;
+  if (isDryRun) {
+    return runDryRun(context, maxIterations);
+  }
+
+  const { controlPlane } = context;
   let runEndStatus: RunEndStatus | undefined;
   let runSpecIssueId: string | undefined;
   let workPath: WorkPath | undefined;
   let skippedStaleStandaloneSelection = false;
-
-  if (isDryRun) {
-    console.log(`\n\nMax iterations: ${maxIterations}`);
-  }
 
   iterationLoop: for (
     let iteration = 1;
     iteration <= maxIterations;
     iteration++
   ) {
-    if (!(await git.hasSafeWorkingTree())) {
-      runEndStatus = {
-        kind: "aborted",
-        reason: "The base checkout has tracked working-tree changes.",
-      };
-      process.exitCode = 1;
+    const unsafeCheckout = await requireSafeBaseCheckout(context);
+    if (unsafeCheckout !== undefined) {
+      runEndStatus = unsafeCheckout;
       break;
     }
 
-    if (!isDryRun) {
-      console.log(
-        chalk.blue(`\n=== Iteration ${iteration}/${maxIterations} ===\n`),
-      );
-    }
+    console.log(
+      chalk.blue(`\n=== Iteration ${iteration}/${maxIterations} ===\n`),
+    );
 
-    let workCandidates: WorkCandidates;
-    try {
-      workCandidates = await controlPlane.getWorkCandidates();
-    } catch (error) {
-      const planningStatus = classifyPlanningError(error);
-      if (!planningStatus) {
-        throw error;
-      }
-      console.warn(`WARNING: ${formatDiagnostic(error)}`);
-      runEndStatus = planningStatus;
+    const plan = await planWork(context);
+    if (plan.kind === "ended") {
+      runEndStatus = plan.status;
       break;
     }
     const {
@@ -151,41 +245,7 @@ export async function runWorkflow(
       standaloneIssues,
       blockedStandaloneIssues,
       errors,
-    } = workCandidates;
-
-    if (isDryRun) {
-      if (
-        errors.length === 0 &&
-        specCandidates.length > 0 &&
-        standaloneIssues.length > 0
-      ) {
-        const choice = await chooseWorkPath();
-        if (choice.kind === "unanswered") {
-          runEndStatus = stopForUnansweredWorkPath(choice.reason);
-          break;
-        }
-        workPath = choice.workPath;
-      }
-      printDryRun({
-        specCandidates,
-        standaloneIssues,
-        blockedStandaloneIssues,
-        errors,
-        workPath,
-      });
-      runEndStatus =
-        errors.length === 0
-          ? {
-              kind: "completed",
-              reason: "Dry run completed without starting any agents.",
-            }
-          : {
-              kind: "stopped",
-              reason:
-                "Dry run found invalid GitHub native sub-issue relationships.",
-            };
-      break;
-    }
+    } = plan.workCandidates;
 
     if (errors.length > 0) {
       console.warn(
@@ -198,18 +258,12 @@ export async function runWorkflow(
       break;
     }
 
-    if (
-      workPath === undefined &&
-      specCandidates.length > 0 &&
-      standaloneIssues.length > 0
-    ) {
-      const choice = await chooseWorkPath();
-      if (choice.kind === "unanswered") {
-        runEndStatus = stopForUnansweredWorkPath(choice.reason);
-        break;
-      }
-      workPath = choice.workPath;
+    const resolution = await resolveWorkPath(workPath, plan.workCandidates);
+    if (resolution.kind === "ended") {
+      runEndStatus = resolution.status;
+      break;
     }
+    workPath = resolution.workPath;
 
     //
     // region Standalone workflow
@@ -326,10 +380,7 @@ export async function runWorkflow(
       );
     }
 
-    const unresolvedChildren = selectedSpec.children.filter(
-      (child) =>
-        child.status !== "closed" && child.status !== "ready-for-agent",
-    );
+    const unresolvedChildren = getUnresolvedChildren(selectedSpec.children);
 
     if (unresolvedChildren.length > 0) {
       console.warn(
@@ -371,15 +422,6 @@ export async function runWorkflow(
     }
 
     if (!plannedIssue) {
-      if (!(await git.hasSafeWorkingTree())) {
-        runEndStatus = {
-          kind: "aborted",
-          reason: "The base checkout has tracked working-tree changes.",
-        };
-        process.exitCode = 1;
-        break;
-      }
-
       console.log(
         `Spec #${selectedSpec.id} has no open ready-for-agent child issues. Running final spec review.`,
       );

@@ -4,6 +4,7 @@ import type { WorkPath } from "./issue-workflow.ts";
 import {
   getBlockedReadyChildren,
   getEligibleChildren,
+  getUnresolvedChildren,
   type BlockedStandaloneIssue,
   type ReadyIssue,
   type SpecCandidate,
@@ -87,9 +88,7 @@ export function printDryRun({
   const selectedSpec = specCandidates[0];
   const readyChildren = getEligibleChildren(selectedSpec.children);
   const blockedReadyChildren = getBlockedReadyChildren(selectedSpec.children);
-  const unresolvedChildren = selectedSpec.children.filter(
-    (child) => child.status !== "closed" && child.status !== "ready-for-agent",
-  );
+  const unresolvedChildren = getUnresolvedChildren(selectedSpec.children);
 
   console.log(
     `\nSelected earliest spec: #${selectedSpec.id} ${selectedSpec.title}.`,

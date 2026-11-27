@@ -48,7 +48,7 @@ Describe test, environment, and missing-context failures as review or execution 
 ## Guardrails
 
 - Treat ADRs and `docs/adr/README.md` as owner-authored and read-only. Correct implementation code to conform to them.
-- Leave issue closure to the merge phase.
+- Leave issue closure to Integration; the runner closes the issue after it fast-forwards the Base Branch.
 - Commit only verified reviewer corrections.
 
 ## Project guidance
