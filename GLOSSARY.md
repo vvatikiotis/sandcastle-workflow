@@ -12,8 +12,12 @@ An independently versioned, read-only artifact containing the executable, the Pa
 **Consumer Repository**:
 The Git worktree where a Workflow Package runs. It owns configuration, credentials, project guidance, project overrides, and writable Workflow State.
 
+**Base Branch**:
+The branch checked out in the Consumer Repository when an issue starts; Integration fast-forwards it.
+_Avoid_: target branch, main
+
 **Workflow State**:
-Project-local logs, worktrees, dependency overlays, the active-run lock, and merger recovery state beneath the Consumer Repository's `.sandcastle` directory. It is separate from source code, project configuration, and credentials.
+Project-local logs, worktrees, dependency overlays, and the active-run lock beneath the Consumer Repository's `.sandcastle` directory. It is separate from source code, project configuration, and credentials.
 
 **Packaged Default**:
 A prompt or Dockerfile shipped in the Workflow Package and resolved relative to the compiled executable.
@@ -62,11 +66,17 @@ The agent role that implements one selected issue on its issue branch and commit
 **Reviewer**:
 The agent role that reviews the implementer's branch against the issue, then approves it or commits corrections on that branch.
 
-**Merger**:
-The agent role that rebases a reviewed branch onto the captured base branch, verifies it, and commits any verification fix. It never updates the base branch or closes the issue.
-
 **Integration**:
-The runner-owned step after the Merger that fast-forwards the base branch to the verified branch, closes the issue, and deletes the reviewed branch.
+The runner-owned step after the Reviewer that rebases the reviewed branch onto the Base Branch, verifies it, fast-forwards the Base Branch to it, closes the issue, and deletes the branch.
+_Avoid_: merge step
+
+**Reporter**:
+The agent role that explains why Integration failed and gives the operator options, without changing the repository.
+_Avoid_: Merger, conflict resolver
+
+**Integration Report**:
+The Reporter's account of a failed Integration: its cause, where it occurred, and the operator's options.
+_Avoid_: conflict report, failure report
 
 **Final Spec Reviewer**:
 The agent role that reviews a Specification's integrated result once every Child Issue is closed, and closes the Specification when no completion gap remains.
