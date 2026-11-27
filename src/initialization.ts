@@ -44,21 +44,20 @@ const runnerConfigExample = [
 
 const agentEnvironmentExample = [
   "# Agent credentials. Only GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN are supported;",
-  "# any other key stops normal-run preflight.",
+  "# any other key stops preflight. Tokens are read only from this file; the runner",
+  "# ignores them in the host environment. A declared key must have a value.",
   "",
-  "# Required: GitHub personal access token forwarded to agents for GitHub Issues access.",
+  "# Required: GitHub personal access token for the runner's GitHub calls and for agents.",
   "# Create a fine-grained token: https://github.com/settings/personal-access-tokens/new",
   "# Required repository permissions: Issues (Read and write) and Metadata (Read)",
-  "# Leave empty to use a non-empty GH_TOKEN from the host environment.",
   "# Example: GH_TOKEN=github_pat_...",
   "GH_TOKEN=",
   "",
   "# Optional: Claude Code login token from `claude setup-token`, used when a role runs claude-code.",
-  "# When empty, Sandcastle uses a non-empty CLAUDE_CODE_OAUTH_TOKEN from the host environment,",
-  "# and otherwise the ~/.claude/.credentials.json login. On macOS, where Claude Code keeps its",
-  "# login in the Keychain, set this token.",
+  "# Without it, Claude Code uses the ~/.claude/.credentials.json login. On macOS, where Claude",
+  "# Code keeps its login in the Keychain, set this token.",
   "# Example: CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...",
-  "CLAUDE_CODE_OAUTH_TOKEN=",
+  "# CLAUDE_CODE_OAUTH_TOKEN=",
   "",
 ].join("\n");
 

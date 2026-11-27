@@ -136,7 +136,7 @@ export function createAgentRuntime({
   dockerImageName: string;
   installCommand: readonly string[];
   // Empty for a dry run, which never launches agents.
-  agentEnvironment: Partial<AgentEnvironment>;
+  agentEnvironment: AgentEnvironment;
   // One per agent the config uses; empty for a dry run.
   agentLogins: readonly AgentLogin[];
 }): AgentRuntime {
@@ -162,12 +162,10 @@ export function createAgentRuntime({
     "node-modules-overlays",
   );
 
-  // CLAUDE_CODE_OAUTH_TOKEN reaches the sandbox only through its Claude Code
-  // login, so a config without Claude Code never forwards it.
+  // The runner passes CLAUDE_CODE_OAUTH_TOKEN only with a Claude Code login.
+  // Sandcastle itself also forwards every key .sandcastle/.env declares.
   const env = {
-    ...(agentEnvironment.GH_TOKEN === undefined
-      ? {}
-      : { GH_TOKEN: agentEnvironment.GH_TOKEN }),
+    GH_TOKEN: agentEnvironment.GH_TOKEN,
     ...Object.fromEntries(
       loginSetups.flatMap((setup) => Object.entries(setup.env)),
     ),

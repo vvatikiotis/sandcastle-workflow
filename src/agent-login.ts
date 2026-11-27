@@ -28,7 +28,7 @@ const agentCommands: Record<AgentProvider, string> = {
 const loginInstructions: Record<AgentProvider, string> = {
   codex: "Run `codex login` on the host so that ~/.codex/auth.json exists.",
   "claude-code":
-    "Run `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN in .sandcastle/.env or the host environment; on macOS, where Claude Code keeps its login in the Keychain, this is the only way. On Linux, logging in with `claude` so that ~/.claude/.credentials.json exists also works.",
+    "Run `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN in .sandcastle/.env (the host environment is ignored); on macOS, where Claude Code keeps its login in the Keychain, this is the only way. On Linux, logging in with `claude` so that ~/.claude/.credentials.json exists also works.",
 };
 
 const roles: readonly { key: keyof AgentConfig; name: string }[] = [
@@ -102,7 +102,7 @@ async function resolveClaudeCodeLogin(
       }
     : {
         kind: "missing",
-        reason: `CLAUDE_CODE_OAUTH_TOKEN is not set in .sandcastle/.env or the host environment, and ${credentialsPath} is not a readable file`,
+        reason: `CLAUDE_CODE_OAUTH_TOKEN is not set in .sandcastle/.env, and ${credentialsPath} is not a readable file`,
       };
 }
 
