@@ -20,6 +20,27 @@ export function createProjectExec(projectRoot: string): Exec {
     rawExecFile(file, [...args], { cwd: projectRoot, encoding: "utf8" });
 }
 
+// Variables gh reads a token from. The runner's GitHub calls must use only
+// the GH_TOKEN from .sandcastle/.env, so host values are removed.
+const hostGitHubTokenKeys = [
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+] as const;
+
+// Like createProjectExec, but every command sees ghToken as GH_TOKEN and no
+// token from the host environment.
+export function createGitHubExec(projectRoot: string, ghToken: string): Exec {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of hostGitHubTokenKeys) {
+    delete env[key];
+  }
+  env.GH_TOKEN = ghToken;
+  return (file, args) =>
+    rawExecFile(file, [...args], { cwd: projectRoot, encoding: "utf8", env });
+}
+
 // Everything a workflow run needs once preflight has passed. The runner
 // builds it once; workflow modules receive it instead of reading globals.
 export type RunContext = {

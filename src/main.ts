@@ -63,13 +63,16 @@ import {
 } from "./initialization.ts";
 import { resolveDockerfile, resolveDockerImageName } from "./docker-image.ts";
 import { resolvePackageManager } from "./package-manager.ts";
-import { createProjectExec, type RunContext } from "./run-context.ts";
+import {
+  createGitHubExec,
+  createProjectExec,
+  type RunContext,
+} from "./run-context.ts";
 import {
   getAgentConfig,
   loadAgentEnvironment,
   loadRunnerConfig,
   requireMaxIterations,
-  type AgentEnvironment,
 } from "./runner-config.ts";
 import { resolveAgentLogins, type AgentLogin } from "./agent-login.ts";
 import {
@@ -247,7 +250,6 @@ await requireProjectSandcastleDirectory(projectRoot);
 
 const execFile = createProjectExec(projectRoot);
 const git = createGitState(execFile);
-const controlPlane = createControlPlane({ execFile, packageVersion });
 
 const packageManager = await resolvePackageManager(projectRoot, packageVersion);
 const verificationCommands = {
@@ -341,7 +343,16 @@ if (command === "build-image") {
 // region GitHub preflight
 //
 
-await validateGitHubRepository(execFile, packageVersion);
+// GitHub calls, including a dry run's planning, use only the GH_TOKEN from
+// .sandcastle/.env.
+const agentEnvironment = await loadAgentEnvironment(projectRoot);
+const gitHubExec = createGitHubExec(projectRoot, agentEnvironment.GH_TOKEN);
+const controlPlane = createControlPlane({
+  execFile: gitHubExec,
+  packageVersion,
+});
+
+await validateGitHubRepository(gitHubExec, packageVersion);
 
 //
 // endregion GitHub preflight
@@ -379,15 +390,12 @@ if (!optionalGuidance.agentInstructions) {
   console.log("Info: No AGENTS.md found.");
 }
 
-// A dry run launches no agents, so it needs neither credentials nor logins.
-let agentEnvironment: Partial<AgentEnvironment> = {};
+// A dry run launches no agents, so it needs no agent logins.
 let agentLogins: readonly AgentLogin[] = [];
 if (!isDryRun) {
-  const loadedEnvironment = await loadAgentEnvironment(projectRoot);
-  agentEnvironment = loadedEnvironment;
   agentLogins = await resolveAgentLogins({
     agentConfig: AGENT_CONFIG,
-    agentEnvironment: loadedEnvironment,
+    agentEnvironment,
     homeDirectory: os.homedir(),
   });
 }

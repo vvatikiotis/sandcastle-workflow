@@ -84,6 +84,8 @@ These steps install version `0.7.0` in a new pnpm consumer.
 
    The workflow does not work without this PAT and these permissions.
 
+   Tokens are read only from `.sandcastle/.env`; the runner ignores them in the host environment. The runner's own GitHub calls, including those of a dry run, also use this `GH_TOKEN` rather than your `gh` login or a `GH_TOKEN` or `GITHUB_TOKEN` set in your shell.
+
 8. **Optional: expose the ticket-relationship skill**
 
    Skip this step if you publish specification relationships with GitHub CLI or the GitHub web UI instead of an agent.
@@ -245,7 +247,7 @@ cp .sandcastle/sandcastle.env.example .sandcastle/sandcastle.env
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
-The runner configuration selects the agent, model, and effort for each role, the maximum iterations, and an optional Docker image. Each example key has a comment with its allowed values and an example value. The agent environment supports `GH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`; an empty value uses a non-empty host value. Any other key stops normal-run preflight. Initialization does not create active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, or overlays.
+The runner configuration selects the agent, model, and effort for each role, the maximum iterations, and an optional Docker image. Each example key has a comment with its allowed values and an example value. The agent environment supports `GH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`. `GH_TOKEN` is required, a declared key must have a value, and host values of either are ignored. Any other key, a missing `GH_TOKEN`, or an empty declaration stops preflight, including a dry run's. Initialization does not create active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, or overlays.
 
 ## Agents and logins
 
@@ -263,7 +265,7 @@ An agent key is `codex` or `claude-code`. It has no default: a missing or empty 
 Before any sandbox starts, a normal run checks a login for every agent the configuration uses. A missing login exits with status `1` and names the roles, the agent, and how to log in. `--dry-run` checks no logins. An agent no role uses gets no check, mount, or copy.
 
 - **Codex:** run `codex login` on the host. `~/.codex/auth.json` must be a readable file. The runner mounts `~/.codex` read-only and copies `auth.json`, and `config.toml` when present, into the sandbox.
-- **Claude Code with a token:** run `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN` in `.sandcastle/.env`, or leave it empty and set it in the host environment. The token takes precedence: the runner forwards it to the sandbox and does not mount `~/.claude`.
+- **Claude Code with a token:** run `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN` in `.sandcastle/.env`; a token in the host environment is ignored. The token takes precedence: the runner forwards it to the sandbox and does not mount `~/.claude`.
 - **Claude Code with `~/.claude`:** without a token, `~/.claude/.credentials.json` must be a readable file, which logging in with `claude` creates on Linux. The runner mounts `~/.claude` read-only and copies `.credentials.json` into the sandbox.
 
 On macOS, Claude Code keeps its login in the Keychain rather than in `~/.claude/.credentials.json`, so use the token there.

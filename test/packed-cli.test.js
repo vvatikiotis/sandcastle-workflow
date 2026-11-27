@@ -10,6 +10,7 @@ import {
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
   symlink,
@@ -182,6 +183,8 @@ async function prepareDryRunConsumer(manager) {
   );
   await run("git", ["add", "."], { cwd: consumerRoot });
   await run("git", ["commit", "--quiet", "-m", "fixture"], { cwd: consumerRoot });
+  // Ignored, so it stays out of the commit. Dry runs need it for GitHub calls.
+  await writeFile(path.join(consumerRoot, ".sandcastle", ".env"), "GH_TOKEN=test-token\n");
 
   const binRoot = path.join(consumerRoot, "bin");
   await mkdir(binRoot);
@@ -311,6 +314,29 @@ if (command === "label" && action === "list") {
   );
   await chmod(ghPath, 0o755);
 }
+
+// Wraps the fake gh so each call records the token variables it receives.
+async function recordGitHubTokens(ghPath) {
+  const realPath = `${ghPath}-real`;
+  const logPath = `${ghPath}-tokens.log`;
+  await rename(ghPath, realPath);
+  await writeFile(
+    ghPath,
+    `#!/bin/sh
+printf '%s|%s|%s|%s\\n' "$GH_TOKEN" "$GITHUB_TOKEN" "$GH_ENTERPRISE_TOKEN" "$GITHUB_ENTERPRISE_TOKEN" >> ${JSON.stringify(logPath)}
+exec ${JSON.stringify(realPath)} "$@"
+`
+  );
+  await chmod(ghPath, 0o755);
+  return async () => (await readFile(logPath, "utf8")).trim().split("\n");
+}
+
+const hostGitHubTokens = {
+  GH_TOKEN: "host-secret",
+  GITHUB_TOKEN: "host-secret",
+  GH_ENTERPRISE_TOKEN: "host-secret",
+  GITHUB_ENTERPRISE_TOKEN: "host-secret",
+};
 
 function standaloneIssue(id, title = `Standalone ${id}`) {
   return { id, title, createdAt: `2026-01-01T00:00:${id.padStart(2, "0").slice(-2)}Z`, parentId: null };
@@ -635,7 +661,13 @@ describe("packed CLI", () => {
       "utf8"
     );
     assertDocumented(agentEnvironmentExample, "GH_TOKEN", "");
-    assertDocumented(agentEnvironmentExample, "CLAUDE_CODE_OAUTH_TOKEN", "");
+    // Optional, so commented out: an empty declaration stops the run.
+    assert.match(
+      agentEnvironmentExample,
+      /^# .*Example: CLAUDE_CODE_OAUTH_TOKEN=\S+\n# CLAUDE_CODE_OAUTH_TOKEN=$/m
+    );
+    assert.doesNotMatch(agentEnvironmentExample, /^CLAUDE_CODE_OAUTH_TOKEN=/m);
+    assert.match(agentEnvironmentExample, /ignores them in the host environment/);
     assert.match(agentEnvironmentExample, /claude setup-token/);
     assert.match(agentEnvironmentExample, /macOS/);
     assert.match(
@@ -1819,28 +1851,25 @@ fi
       assert.match(missing.stderr, /sandcastle\.env is required/);
     });
 
-    it("requires usable agent credentials only for runs that launch agents and never prints them", async () => {
-      const { consumerRoot, shim, environment } = await prepareWorkflowConsumer(
+    it("reads GH_TOKEN only from .sandcastle/.env, for dry runs too, and never prints it", async () => {
+      const { consumerRoot, shim, environment, ghPath } = await prepareWorkflowConsumer(
         "pnpm-agent-credentials",
         { readyIssueLists: [[]] }
       );
       const agentEnvironmentPath = path.join(consumerRoot, ".sandcastle", ".env");
       const secrets = /file-secret|host-secret|first-secret|second-secret/;
-      const hostEnvironment = { ...environment };
-      delete hostEnvironment.GH_TOKEN;
+      const hostEnvironment = { ...environment, ...hostGitHubTokens };
+      const readGitHubTokens = await recordGitHubTokens(ghPath);
 
       await rm(agentEnvironmentPath);
-      const dryRun = await run(shim, ["--dry-run"], {
-        cwd: consumerRoot,
-        env: hostEnvironment,
-      });
-      assert.match(dryRun.stdout, /SANDCASTLE RUN: COMPLETED/);
-      const missing = await runExpectingFailure(shim, [], {
-        cwd: consumerRoot,
-        env: hostEnvironment,
-      });
-      assert.equal(missing.code, 1);
-      assert.match(missing.stderr, /\.sandcastle\/\.env is required before launching agents/);
+      for (const args of [["--dry-run"], []]) {
+        const missing = await runExpectingFailure(shim, args, {
+          cwd: consumerRoot,
+          env: hostEnvironment,
+        });
+        assert.equal(missing.code, 1);
+        assert.match(missing.stderr, /\.sandcastle\/\.env is required before launching agents/);
+      }
 
       const rejected = [
         { contents: "GH_TOKEN\n", diagnostic: /expected a KEY=value assignment/ },
@@ -1849,33 +1878,34 @@ fi
           diagnostic: /duplicate environment key GH_TOKEN/,
         },
         { contents: "# No credential declared.\n", diagnostic: /must declare GH_TOKEN/ },
-        { contents: "GH_TOKEN=\n", diagnostic: /no usable credential was provided/ },
-        { contents: 'GH_TOKEN="   "\n', diagnostic: /no usable credential was provided/ },
+        { contents: "GH_TOKEN=\n", diagnostic: /declares GH_TOKEN without a value.*ignores GH_TOKEN in the host environment/ },
+        { contents: 'GH_TOKEN="   "\n', diagnostic: /declares GH_TOKEN without a value/ },
       ];
       for (const { contents, diagnostic } of rejected) {
         await writeFile(agentEnvironmentPath, contents);
-        const error = await runExpectingFailure(shim, [], {
-          cwd: consumerRoot,
-          env: hostEnvironment,
-        });
-        assert.equal(error.code, 1);
-        assert.match(error.stderr, diagnostic);
-        assert.doesNotMatch(`${error.stdout}\n${error.stderr}`, secrets);
+        for (const args of [["--dry-run"], []]) {
+          const error = await runExpectingFailure(shim, args, {
+            cwd: consumerRoot,
+            env: hostEnvironment,
+          });
+          assert.equal(error.code, 1);
+          assert.match(error.stderr, diagnostic);
+          assert.doesNotMatch(`${error.stdout}\n${error.stderr}`, secrets);
+        }
       }
+      // No preflight failure reached GitHub.
+      await assert.rejects(readGitHubTokens());
 
       await writeFile(agentEnvironmentPath, "GH_TOKEN=file-secret\n");
-      const fromFile = await run(shim, [], {
-        cwd: consumerRoot,
-        env: hostEnvironment,
-      });
-      await writeFile(agentEnvironmentPath, "GH_TOKEN=\n");
-      const fromHost = await run(shim, [], {
-        cwd: consumerRoot,
-        env: { ...hostEnvironment, GH_TOKEN: "host-secret" },
-      });
-      for (const result of [fromFile, fromHost]) {
+      for (const args of [["--dry-run"], []]) {
+        const result = await run(shim, args, { cwd: consumerRoot, env: hostEnvironment });
         assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
         assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, secrets);
+      }
+      const calls = await readGitHubTokens();
+      assert.ok(calls.length > 0);
+      for (const call of calls) {
+        assert.equal(call, "file-secret|||");
       }
     });
 
@@ -1935,7 +1965,7 @@ fi
 
       await writeFile(sandcastleIgnorePath, initializedIgnore);
       await writeFile(rootIgnorePath, "node_modules/\n");
-      await writeFile(path.join(consumerRoot, ".sandcastle", ".env"), "GH_TOKEN=\n");
+      await writeFile(path.join(consumerRoot, ".sandcastle", ".env"), "GH_TOKEN=test-token\n");
       await run("git", ["add", "--force", ".sandcastle/.env"], { cwd: consumerRoot });
       const tracked = await dryRunFailure();
       assert.equal(tracked.code, 1);
@@ -2116,7 +2146,7 @@ fi
       assert.deepEqual(await readClosedIssues(fixturePath), []);
     });
 
-    it("prefers CLAUDE_CODE_OAUTH_TOKEN over the ~/.claude login, from the file or else the host", async () => {
+    it("prefers CLAUDE_CODE_OAUTH_TOKEN from .sandcastle/.env over the ~/.claude login", async () => {
       const { consumerRoot, shim, environment, capturePath } = await prepareAgentConsumer(
         "pnpm-agent-token",
         { agents: allRolesOnClaudeCode, logins: { claude: true } }
@@ -2136,28 +2166,37 @@ fi
         fileSandbox.hooks.sandbox.onSandboxReady.map((hook) => hook.command),
         ["pnpm install --frozen-lockfile"]
       );
+      assert.doesNotMatch(`${fromFile.stdout}\n${fromFile.stderr}`, /claude-file-secret|claude-host-secret/);
+    });
 
-      // Without ~/.claude, a host token alone is a login.
-      const hostOnly = await prepareAgentConsumer("pnpm-agent-host-token", {
-        agents: allRolesOnClaudeCode,
-        logins: {},
-      });
-      await writeFile(
-        path.join(hostOnly.consumerRoot, ".sandcastle", ".env"),
-        "GH_TOKEN=test-token\nCLAUDE_CODE_OAUTH_TOKEN=\n"
+    it("ignores a host CLAUDE_CODE_OAUTH_TOKEN and stops on an empty declaration", async () => {
+      const { consumerRoot, shim, environment, capturePath, fixturePath } = await prepareAgentConsumer(
+        "pnpm-agent-host-token",
+        { agents: allRolesOnClaudeCode, logins: {} }
       );
-      const fromHost = await run(hostOnly.shim, [], {
-        cwd: hostOnly.consumerRoot,
-        env: { ...hostOnly.environment, CLAUDE_CODE_OAUTH_TOKEN: "claude-host-secret" },
-      });
-      assert.match(fromHost.stdout, /SANDCASTLE RUN: COMPLETED/);
-      const hostSandbox = (await readCaptures(hostOnly.capturePath)).find(
-        (entry) => entry.type === "sandbox"
-      );
-      assert.equal(hostSandbox.env.CLAUDE_CODE_OAUTH_TOKEN, "claude-host-secret");
-      for (const result of [fromFile, fromHost]) {
-        assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /claude-file-secret|claude-host-secret/);
+      const agentEnvironmentPath = path.join(consumerRoot, ".sandcastle", ".env");
+      const hostEnvironment = { ...environment, CLAUDE_CODE_OAUTH_TOKEN: "claude-host-secret" };
+
+      for (const args of [["--dry-run"], []]) {
+        await writeFile(agentEnvironmentPath, "GH_TOKEN=test-token\nCLAUDE_CODE_OAUTH_TOKEN=\n");
+        const empty = await runExpectingFailure(shim, args, { cwd: consumerRoot, env: hostEnvironment });
+        assert.equal(empty.code, 1);
+        assert.match(
+          empty.stderr,
+          /declares CLAUDE_CODE_OAUTH_TOKEN without a value.*ignores CLAUDE_CODE_OAUTH_TOKEN in the host environment/
+        );
+        assert.doesNotMatch(`${empty.stdout}\n${empty.stderr}`, /claude-host-secret/);
       }
+
+      // Without the key and without ~/.claude, a host token is not a login.
+      await writeFile(agentEnvironmentPath, "GH_TOKEN=test-token\n");
+      const hostOnly = await runExpectingFailure(shim, [], { cwd: consumerRoot, env: hostEnvironment });
+      assert.equal(hostOnly.code, 1);
+      assert.match(hostOnly.stderr, /CLAUDE_CODE_OAUTH_TOKEN is not set in \.sandcastle\/\.env, and/);
+      assert.doesNotMatch(`${hostOnly.stdout}\n${hostOnly.stderr}`, /claude-host-secret/);
+
+      await assert.rejects(access(capturePath));
+      assert.deepEqual(await readClosedIssues(fixturePath), []);
     });
 
     for (const { role, agent, agentName, command, agents, login } of [

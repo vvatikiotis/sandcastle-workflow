@@ -25,7 +25,7 @@ export type AgentConfig = {
 
 export type AgentEnvironment = {
   GH_TOKEN: string;
-  // Absent when neither the file nor the host environment sets a value.
+  // Absent when .sandcastle/.env does not declare it.
   CLAUDE_CODE_OAUTH_TOKEN?: string;
 };
 
@@ -305,7 +305,7 @@ export async function loadAgentEnvironment(
   } catch (error) {
     if (getErrorCode(error) === "ENOENT") {
       throw new Error(
-        `${agentEnvironmentPath} is required before launching agents. Copy .sandcastle/.env.example to .sandcastle/.env and set GH_TOKEN, or leave GH_TOKEN empty to use the documented host-environment fallback.`,
+        `${agentEnvironmentPath} is required before launching agents. Copy .sandcastle/.env.example to .sandcastle/.env and set GH_TOKEN.`,
       );
     }
     throw error;
@@ -353,31 +353,34 @@ export async function loadAgentEnvironment(
     );
   }
 
-  const ghToken = resolveCredential(values, "GH_TOKEN");
-  if (ghToken === undefined) {
-    throw new Error(
-      `${agentEnvironmentPath} declares GH_TOKEN, but no usable credential was provided in the file or host environment.`,
-    );
-  }
+  const ghToken = requireCredential(values, "GH_TOKEN", agentEnvironmentPath);
   // Optional: Claude Code can log in from ~/.claude instead.
-  const claudeCodeOAuthToken = resolveCredential(
-    values,
-    "CLAUDE_CODE_OAUTH_TOKEN",
-  );
-  return claudeCodeOAuthToken === undefined
-    ? { GH_TOKEN: ghToken }
-    : { GH_TOKEN: ghToken, CLAUDE_CODE_OAUTH_TOKEN: claudeCodeOAuthToken };
+  if (!values.has("CLAUDE_CODE_OAUTH_TOKEN")) {
+    return { GH_TOKEN: ghToken };
+  }
+  return {
+    GH_TOKEN: ghToken,
+    CLAUDE_CODE_OAUTH_TOKEN: requireCredential(
+      values,
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      agentEnvironmentPath,
+    ),
+  };
 }
 
-// A non-blank value in .sandcastle/.env wins; otherwise a non-blank host value.
-function resolveCredential(
+// Tokens come only from .sandcastle/.env. A declared key must have a value:
+// Sandcastle fills a key declared empty from the host environment and forwards
+// it into every sandbox, so an empty declaration would let a host token in.
+function requireCredential(
   fileValues: ReadonlyMap<AgentEnvironmentKey, string>,
   key: AgentEnvironmentKey,
-): string | undefined {
+  agentEnvironmentPath: string,
+): string {
   const fileValue = fileValues.get(key) ?? "";
-  if (fileValue.trim() !== "") {
-    return fileValue;
+  if (fileValue.trim() === "") {
+    throw new Error(
+      `${agentEnvironmentPath} declares ${key} without a value. Set it in that file; the runner ignores ${key} in the host environment.`,
+    );
   }
-  const hostValue = process.env[key] ?? "";
-  return hostValue.trim() === "" ? undefined : hostValue;
+  return fileValue;
 }
