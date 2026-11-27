@@ -2,6 +2,7 @@ import chalk from "chalk";
 import { createInterface } from "node:readline/promises";
 
 import type { WorkCandidates } from "./control-plane.ts";
+import { unsafeBaseCheckoutReason } from "./git-state.ts";
 import { printBlockedStandaloneIssues, printDryRun } from "./dry-run.ts";
 import { runFinalSpecReview } from "./final-spec-review.ts";
 import {
@@ -15,6 +16,7 @@ import type { RunContext } from "./run-context.ts";
 import {
   getBlockedReadyChildren,
   getEligibleChildren,
+  getOpenBlockerIds,
   getUnresolvedChildren,
   selectRunSpec,
 } from "./spec-selection.ts";
@@ -126,7 +128,7 @@ async function requireSafeBaseCheckout(
   process.exitCode = 1;
   return {
     kind: "aborted",
-    reason: "The base checkout has tracked working-tree changes.",
+    reason: unsafeBaseCheckoutReason,
   };
 }
 
@@ -402,13 +404,10 @@ export async function runWorkflow(
         `WARNING: Spec #${selectedSpec.id} has no unblocked ready child issues:\n${blockedReadyChildren
           .map(
             (child) =>
-              `- #${child.id} blocked by ${child.blockerIds
-                .filter(
-                  (blockerId) =>
-                    selectedSpec.children.find(
-                      (candidate) => candidate.id === blockerId,
-                    )?.status !== "closed",
-                )
+              `- #${child.id} blocked by ${getOpenBlockerIds(
+                child,
+                selectedSpec.children,
+              )
                 .map((blockerId) => `#${blockerId}`)
                 .join(", ")}`,
           )

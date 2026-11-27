@@ -1,8 +1,8 @@
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { getErrorCode } from "./error-code.ts";
 import {
+  entryExists,
   isWithinDirectory,
   requireReadableRegularFile,
 } from "./file-resolution.ts";
@@ -19,14 +19,14 @@ export const promptFilenames = [
 
 export type PromptFilename = (typeof promptFilenames)[number];
 
-export type PromptSelection = {
+type PromptSelection = {
   filename: PromptFilename;
   path: string;
   guidance: string;
   guidancePath?: string;
 };
 
-export type OptionalProjectGuidance = {
+type OptionalProjectGuidance = {
   codingStandards: boolean;
   agentInstructions: boolean;
 };
@@ -39,13 +39,8 @@ async function hasOptionalProjectFile(
   description: string
 ): Promise<boolean> {
   const filePath = path.join(projectRoot, filename);
-  try {
-    await lstat(filePath);
-  } catch (error) {
-    if (getErrorCode(error) === "ENOENT") {
-      return false;
-    }
-    throw new Error(`Could not inspect ${description}.`, { cause: error });
+  if (!(await entryExists(filePath, description))) {
+    return false;
   }
   await requireReadableRegularFile(filePath, description);
   return true;
@@ -81,15 +76,8 @@ async function resolvePromptSelection(options: {
   );
   const guidancePath = path.join(projectRoot, ".sandcastle", filename);
 
-  try {
-    await lstat(guidancePath);
-  } catch (error) {
-    if (getErrorCode(error) === "ENOENT") {
-      return { filename, path: packagedPath, guidance: "" };
-    }
-    throw new Error(`Could not inspect project guidance ${filename}.`, {
-      cause: error,
-    });
+  if (!(await entryExists(guidancePath, `project guidance ${filename}`))) {
+    return { filename, path: packagedPath, guidance: "" };
   }
 
   const resolvedGuidancePath = await requireReadableRegularFile(

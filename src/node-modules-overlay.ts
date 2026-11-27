@@ -11,7 +11,7 @@ export type NodeModulesOverlay = {
   };
 };
 
-export type StaleOverlayCleanup = {
+type StaleOverlayCleanup = {
   removed: string[];
   preserved: string[];
 };

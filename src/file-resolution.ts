@@ -2,6 +2,8 @@ import { constants } from "node:fs";
 import { access, chmod, lstat, mkdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { getErrorCode } from "./error-code.ts";
+
 export function isWithinDirectory(
   directory: string,
   candidate: string
@@ -13,6 +15,23 @@ export function isWithinDirectory(
       relative !== ".." &&
       !relative.startsWith(`..${path.sep}`))
   );
+}
+
+// False when nothing exists at `filePath`, including a dangling symlink; any
+// other inspection failure throws.
+export async function entryExists(
+  filePath: string,
+  description: string
+): Promise<boolean> {
+  try {
+    await lstat(filePath);
+    return true;
+  } catch (error) {
+    if (getErrorCode(error) === "ENOENT") {
+      return false;
+    }
+    throw new Error(`Could not inspect ${description}.`, { cause: error });
+  }
 }
 
 export async function requireReadableRegularFile(
