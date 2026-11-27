@@ -9,9 +9,11 @@ Use this guide to turn a source change into a reviewed, locally vendored package
 - Consumer distribution: a reviewed `.tgz` committed under the consumer's `vendor/` directory
 - Publication to npm, workspace links, adjacent checkouts, and source-directory installation are unsupported
 
-The package owns executable code and read-only defaults. Consumers own configuration, credentials, project guidance, project overrides, logs, worktrees, dependency overlays, locks, and recovery state. Preserve the GitHub-native control plane in [ADR-0001](docs/adr/0001-github-native-sandcastle-control-plane.md).
+The package owns executable code and read-only defaults. Consumers own configuration, credentials, project guidance, project overrides, logs, worktrees, dependency overlays, and locks. Preserve the GitHub-native control plane in [ADR-0001](docs/adr/0001-github-native-sandcastle-control-plane.md) and runner-owned Integration in [ADR-0002](docs/adr/0002-runner-owned-integration.md).
 
-Implementer, reviewer, and merger phases must not modify any Consumer Repository file named `Dockerfile`. The runner enforces this after each agent finishes by comparing commits; merger commits are checked before they reach the base branch. A detected change must append a prominent error to that phase's log and abort before the next phase or base-branch update. Maintainers make and review Dockerfile changes outside agent runs, then rebuild the configured image.
+The runner, not an agent, owns Integration. Every agent runs in a Sandcastle sandbox on its own worktree; no Sandcastle call uses `branchStrategy: { type: "head" }`, so no agent mounts the main checkout. The Implementer, Reviewer, Integration, and Reporter share the issue sandbox. Integration rebases and verifies there through `sandbox.exec`, moves the issue branch only after the checks pass, and fast-forwards the Base Branch on the host. The Reporter only explains a failed Integration; the runner verifies that it changed nothing. The Final Spec Reviewer runs on a temporary branch. The runner's own Git commands disable hooks with `-c core.hooksPath=/dev/null`, and a ref guard checks branches, tags, the stash, and the main checkout's `HEAD` after every agent phase.
+
+Agent phases must not modify any Consumer Repository file named `Dockerfile`. The runner enforces this after the implementer and reviewer by comparing commits, and checks the whole rebased branch before the fast-forward. A detected change must append a prominent error to that phase's log and abort before the next phase or base-branch update. Maintainers make and review Dockerfile changes outside agent runs, then rebuild the configured image.
 
 ## Prerequisites
 
@@ -103,7 +105,9 @@ pnpm pack --dry-run
 
 `pnpm test` includes the packed-artifact suite. That suite creates a real tarball, installs it independently in clean npm and pnpm consumers, and tests the installed executable.
 
-The Docker regression checks verification-worktree mount behavior and builds the ejected packaged Dockerfile when Docker is available. It reports a skip when Docker is unavailable. Packed-artifact coverage must also verify consumer-visible workflow safety behavior, including abort status and phase-log diagnostics when an implementer, reviewer, or merger changes a Dockerfile.
+The Docker regression builds the ejected packaged Dockerfile, then runs Integration's rebase, verification, re-attach, and conflict restore against a real Sandcastle Docker sandbox. It checks that the rebased branch is reusable and that close removes the clean worktree. It reports a skip when Docker is unavailable. Under rootless Docker it builds and runs the image with UID 0, which rootless Docker maps to the host user.
+
+The packed-artifact suite replaces `@ai-hero/sandcastle` with `test/fake-sandcastle.mjs`. Like the real SDK, the fake creates a Git worktree per sandbox, runs `exec` commands in it, and removes a clean worktree on close; environment variables choose what each simulated agent does. Packed-artifact coverage must verify consumer-visible workflow behavior through the npm and pnpm consumers: Integration success, rebase conflict and failed verification with their Integration Reports, a Reporter that changes the repository, Base Branch retries, the ref guard, the final spec review, and the Dockerfile guard's abort status and phase-log diagnostics.
 
 ### 5. Build the release artifact
 
@@ -129,7 +133,7 @@ fi
 cat "$CHECKSUM"
 ```
 
-Confirm that the tarball contains only the compiled output, packaged defaults and skills, documentation, and package metadata. It must exclude source, tests, development configuration, credentials, consumer configuration, logs, worktrees, overlays, locks, recovery state, and unrelated repository files.
+Confirm that the tarball contains only the compiled output, packaged defaults and skills, documentation, and package metadata. It must exclude source, tests, development configuration, credentials, consumer configuration, logs, worktrees, overlays, locks, and unrelated repository files.
 
 ### 7. Review the release unit
 

@@ -37,8 +37,8 @@ const validRunnerConfig = [
   "IMPLEMENTER_EFFORT=low",
   "REVIEWER_MODEL=test-model",
   "REVIEWER_EFFORT=low",
-  "MERGER_MODEL=test-model",
-  "MERGER_EFFORT=low",
+  "REPORTER_MODEL=test-model",
+  "REPORTER_EFFORT=low",
   "FINAL_SPEC_REVIEWER_MODEL=test-model",
   "FINAL_SPEC_REVIEWER_EFFORT=low",
   "MAX_ITERATIONS=1",
@@ -174,181 +174,9 @@ async function installFakeSandcastleBoundary(consumerRoot) {
   const fakeDockerPath = path.join(fakeRoot, "docker.mjs");
   const hookPath = path.join(fakeRoot, "hook.mjs");
 
-  await writeFile(
-    fakeModulePath,
-    `import { execFileSync } from "node:child_process";
-import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-
-function capture(value) {
-  appendFileSync(process.env.FAKE_SANDCASTLE_CAPTURE, JSON.stringify(value) + "\\n");
-}
-
-function addCommit(cwd, branch, message) {
-  const parent = execFileSync("git", ["rev-parse", branch], { cwd, encoding: "utf8" }).trim();
-  const tree = execFileSync("git", ["rev-parse", parent + "^{tree}"], { cwd, encoding: "utf8" }).trim();
-  const commit = execFileSync("git", ["commit-tree", tree, "-p", parent, "-m", message], {
-    cwd,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "Fake Agent",
-      GIT_AUTHOR_EMAIL: "agent@example.com",
-      GIT_COMMITTER_NAME: "Fake Agent",
-      GIT_COMMITTER_EMAIL: "agent@example.com",
-    },
-  }).trim();
-  execFileSync("git", ["update-ref", "refs/heads/" + branch, commit], { cwd });
-}
-
-function addFileCommit(cwd, branch, filePath, contents, message) {
-  const parent = execFileSync("git", ["rev-parse", branch], { cwd, encoding: "utf8" }).trim();
-  const indexPath = cwd + "/.git/fake-agent-index";
-  const gitEnv = { ...process.env, GIT_INDEX_FILE: indexPath };
-  execFileSync("git", ["read-tree", parent], { cwd, env: gitEnv });
-  const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
-    cwd,
-    encoding: "utf8",
-    input: contents,
-  }).trim();
-  execFileSync("git", ["update-index", "--add", "--cacheinfo", "100644," + blob + "," + filePath], {
-    cwd,
-    env: gitEnv,
-  });
-  const tree = execFileSync("git", ["write-tree"], { cwd, env: gitEnv, encoding: "utf8" }).trim();
-  rmSync(indexPath, { force: true });
-  const commit = execFileSync("git", ["commit-tree", tree, "-p", parent, "-m", message], {
-    cwd,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "Fake Agent",
-      GIT_AUTHOR_EMAIL: "agent@example.com",
-      GIT_COMMITTER_NAME: "Fake Agent",
-      GIT_COMMITTER_EMAIL: "agent@example.com",
-    },
-  }).trim();
-  execFileSync("git", ["update-ref", "refs/heads/" + branch, commit], { cwd });
-}
-
-function commitInWorktree(worktree, filePath, contents, message) {
-  const target = worktree + "/" + filePath;
-  mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
-  writeFileSync(target, contents);
-  execFileSync("git", ["add", "--", filePath], { cwd: worktree });
-  execFileSync("git", ["commit", "--quiet", "-m", message], {
-    cwd: worktree,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "Fake Agent",
-      GIT_AUTHOR_EMAIL: "agent@example.com",
-      GIT_COMMITTER_NAME: "Fake Agent",
-      GIT_COMMITTER_EMAIL: "agent@example.com",
-    },
-  });
-}
-
-function changesFileFor(role) {
-  const change = process.env.FAKE_AGENT_FILE_CHANGE;
-  if (!change) return undefined;
-  const [changeRole, filePath] = change.split(":");
-  return changeRole === role ? filePath : undefined;
-}
-
-export function codex(model, options) {
-  return { model, options };
-}
-
-export async function createSandbox(options) {
-  // Like the real SDK, reuse an existing issue branch and create a missing one
-  // from the checked-out base.
-  try {
-    execFileSync("git", ["rev-parse", "--verify", "--quiet", "refs/heads/" + options.branch], {
-      cwd: options.cwd,
-      stdio: "ignore",
-    });
-  } catch {
-    execFileSync("git", ["branch", options.branch], { cwd: options.cwd });
-  }
-  capture({ type: "sandbox", hooks: options.hooks });
-  return {
-    async run(runOptions) {
-      capture({
-        type: "phase",
-        name: runOptions.name,
-        promptArgs: runOptions.promptArgs,
-        promptFile: runOptions.promptFile,
-        logMode: statSync(runOptions.logging.path).mode & 0o777,
-        verbose: runOptions.logging.verbose,
-      });
-      if (runOptions.name.includes("implementer")) {
-        const changedFile = changesFileFor("implementer");
-        if (changedFile) {
-          addFileCommit(options.cwd, options.branch, changedFile, "FROM scratch\\n", "sandcastle(implementer): #42: fake implementation");
-        } else {
-          addCommit(options.cwd, options.branch, "sandcastle(implementer): #42: fake implementation");
-        }
-        if (process.env.RECOVERY_SYMLINK_TARGET) {
-          symlinkSync(
-            process.env.RECOVERY_SYMLINK_TARGET,
-            options.cwd + "/.sandcastle/merger-recovery.json"
-          );
-        }
-        return { stdout: "<phase-outcome>implemented</phase-outcome>\\n<promise>COMPLETE</promise>" };
-      }
-      const reviewerFile = changesFileFor("reviewer");
-      if (reviewerFile) {
-        addFileCommit(options.cwd, options.branch, reviewerFile, "FROM scratch\\n", "sandcastle(reviewer): #42: fake refinement");
-      }
-      return { stdout: "<phase-outcome>approved</phase-outcome>\\n<promise>COMPLETE</promise>" };
-    },
-    async close() {
-      return {};
-    },
-  };
-}
-
-export async function run(options) {
-  const recoveryPath = options.cwd + "/.sandcastle/merger-recovery.json";
-  capture({
-    type: "phase",
-    name: options.name,
-    promptArgs: options.promptArgs,
-    promptFile: options.promptFile,
-    hooks: options.hooks,
-    logMode: statSync(options.logging.path).mode & 0o777,
-    verbose: options.logging.verbose,
-    recoveryMode: options.name.includes("merger")
-      ? statSync(recoveryPath).mode & 0o777
-      : undefined,
-    recoveryState: options.name.includes("merger")
-      ? JSON.parse(readFileSync(recoveryPath, "utf8"))
-      : undefined,
-  });
-  if (options.name.includes("final-spec-reviewer")) {
-    execFileSync("gh", ["issue", "close", options.promptArgs.SPEC_ISSUE_ID], { cwd: options.cwd });
-    return { stdout: "<phase-outcome>closed</phase-outcome>\\n<promise>COMPLETE</promise>" };
-  }
-  // The merger rebases, verifies, and commits on the reviewed branch only.
-  // The runner owns the base-branch fast-forward and issue closure.
-  const mergerFile = changesFileFor("merger");
-  if (mergerFile) {
-    const worktree = options.promptArgs.VERIFICATION_WORKTREE_PATH.replace(
-      "/home/agent/workspace",
-      options.cwd
-    );
-    commitInWorktree(worktree, mergerFile, "FROM scratch\\n", "sandcastle(merger): #" + options.promptArgs.ISSUE_ID + ": fake verification fix");
-  }
-  return { stdout: "<phase-outcome>merged</phase-outcome>\\n<promise>COMPLETE</promise>" };
-}
-`
+  await copyFile(
+    path.join(packageRoot, "test", "fake-sandcastle.mjs"),
+    fakeModulePath
   );
   await writeFile(
     fakeDockerPath,
@@ -400,7 +228,7 @@ const fixture = JSON.parse(readFileSync(${JSON.stringify(fixturePath)}, "utf8"))
 const statePath = ${JSON.stringify(`${fixturePath}.state`)};
 const state = existsSync(statePath)
   ? JSON.parse(readFileSync(statePath, "utf8"))
-  : { closed: [], listCalls: 0 };
+  : { closed: [], comments: [], listCalls: 0 };
 const save = () => writeFileSync(statePath, JSON.stringify(state));
 const print = (value) =>
   process.stdout.write((typeof value === "string" ? value : JSON.stringify(value)) + "\\n");
@@ -433,7 +261,11 @@ if (command === "label" && action === "list") {
 } else if (command === "issue" && action === "close") {
   state.closed.push(String(target));
   save();
-} else if (command === "issue" && (action === "comment" || action === "edit")) {
+} else if (command === "issue" && action === "comment") {
+  const bodyFile = args[args.indexOf("--body-file") + 1];
+  state.comments.push({ issue: String(target), body: readFileSync(bodyFile, "utf8") });
+  save();
+} else if (command === "issue" && action === "edit") {
   // Accepted without changing fixture state.
 } else {
   process.stderr.write("unexpected gh arguments: " + args.join(" ") + "\\n");
@@ -479,6 +311,17 @@ async function prepareWorkflowConsumer(manager, fixture) {
 async function readClosedIssues(fixturePath) {
   try {
     return JSON.parse(await readFile(`${fixturePath}.state`, "utf8")).closed;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function readComments(fixturePath) {
+  try {
+    return JSON.parse(await readFile(`${fixturePath}.state`, "utf8")).comments;
   } catch (error) {
     if (error.code === "ENOENT") {
       return [];
@@ -561,10 +404,10 @@ describe("packed CLI", () => {
       "package/dist/defaults/docker/Dockerfile",
       "package/dist/defaults/prompts/final-spec-prompt.md",
       "package/dist/defaults/prompts/implement-prompt.md",
-      "package/dist/defaults/prompts/merge-prompt.md",
+      "package/dist/defaults/prompts/report-prompt.md",
       "package/dist/defaults/prompts/review-prompt.md",
       "package/dist/defaults/prompts/standalone-implement-prompt.md",
-      "package/dist/defaults/prompts/standalone-merge-prompt.md",
+      "package/dist/defaults/prompts/standalone-report-prompt.md",
       "package/dist/defaults/prompts/standalone-review-prompt.md",
       "package/dist/setup.sh",
       "package/package.json",
@@ -588,7 +431,6 @@ describe("packed CLI", () => {
       "/logs/",
       "/worktrees/",
       "/node-modules-overlays/",
-      "/merger-recovery.json",
       "/run.lock",
     ]) {
       assert.equal(entries.some((entry) => entry.includes(forbidden)), false);
@@ -596,9 +438,9 @@ describe("packed CLI", () => {
 
     for (const promptName of [
       "implement-prompt.md",
-      "merge-prompt.md",
+      "report-prompt.md",
       "standalone-implement-prompt.md",
-      "standalone-merge-prompt.md",
+      "standalone-report-prompt.md",
       "standalone-review-prompt.md",
     ]) {
       const { stdout: prompt } = await run("tar", [
@@ -609,7 +451,7 @@ describe("packed CLI", () => {
       assert.doesNotMatch(prompt, /\bpnpm\b/);
       assert.match(prompt, /\{\{TYPECHECK_COMMAND\}\}/);
       assert.match(prompt, /\{\{TEST_COMMAND\}\}/);
-      if (promptName.includes("merge")) {
+      if (promptName.includes("report")) {
         assert.match(prompt, /\{\{INSTALL_COMMAND\}\}/);
       }
       if (promptName === "implement-prompt.md") {
@@ -1435,18 +1277,18 @@ fi
       await chmod(dockerPath, 0o755);
       const hookPath = await installFakeSandcastleBoundary(consumerRoot);
       const capturePath = path.join(consumerRoot, "fake-sandcastle-capture");
-      const recoverySymlinkTarget = path.join(
-        consumerRoot,
-        "recovery-symlink-target"
-      );
-      await writeFile(recoverySymlinkTarget, "do not overwrite\n");
+      const hookMarkerPath = path.join(consumerRoot, "hook-marker");
+      for (const hook of ["pre-rebase", "post-rewrite", "post-checkout", "post-merge"]) {
+        const hookPath = path.join(consumerRoot, ".git", "hooks", hook);
+        await writeFile(hookPath, `#!/bin/sh\necho ${hook} >> "${hookMarkerPath}"\n`);
+        await chmod(hookPath, 0o755);
+      }
       const environment = {
         ...process.env,
         FAKE_SANDCASTLE_CAPTURE: capturePath,
         ISSUE_STATE: issueStatePath,
         NODE_OPTIONS: `--import=${hookPath}`,
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
-        RECOVERY_SYMLINK_TARGET: recoverySymlinkTarget,
       };
       const agentEnvironmentPath = path.join(
         consumerRoot,
@@ -1469,50 +1311,6 @@ fi
       assert.equal((await readFile(issueStatePath, "utf8")).trim(), "OPEN");
       await assert.rejects(access(capturePath));
       await writeFile(agentEnvironmentPath, "GH_TOKEN=test-token\n");
-
-      const recoveryWorktreeRoot = path.join(
-        consumerRoot,
-        ".sandcastle",
-        "worktrees"
-      );
-      const redirectedWorktreePath = path.join(
-        recoveryWorktreeRoot,
-        "sandcastle-merger-verify-issue-42"
-      );
-      const outsideRecoveryRoot = path.join(consumerRoot, "outside-recovery");
-      await mkdir(recoveryWorktreeRoot, { recursive: true });
-      await mkdir(outsideRecoveryRoot);
-      await symlink(outsideRecoveryRoot, redirectedWorktreePath);
-      const recoveryMarkerPath = path.join(
-        consumerRoot,
-        ".sandcastle",
-        "merger-recovery.json"
-      );
-      await writeFile(
-        recoveryMarkerPath,
-        JSON.stringify({
-          baseBranch: "main",
-          reviewedBranch: "sandcastle/issue-42",
-          verificationWorktreePath: redirectedWorktreePath,
-        })
-      );
-      await assert.rejects(
-        run(shim, [], { cwd: consumerRoot, env: environment }),
-        (error) => {
-          assert.equal(error.code, 1);
-          assert.match(
-            `${error.stdout}\n${error.stderr}`,
-            /Recovery worktree must be a real directory/
-          );
-          return true;
-        }
-      );
-      assert.equal((await readFile(issueStatePath, "utf8")).trim(), "OPEN");
-      await assert.rejects(access(capturePath));
-      await access(recoveryMarkerPath);
-      await rm(redirectedWorktreePath);
-      await rm(outsideRecoveryRoot, { recursive: true });
-      await rm(recoveryMarkerPath);
 
       const runLockPath = path.join(consumerRoot, ".sandcastle", "run.lock");
       const existingLock = '{"pid":99999999,"startedAt":"2026-01-01T00:00:00.000Z"}\n';
@@ -1538,7 +1336,6 @@ fi
       });
 
       await assert.rejects(access(runLockPath));
-      assert.equal(await readFile(recoverySymlinkTarget, "utf8"), "do not overwrite\n");
       assert.match(result.stdout, /Selected standalone issue #42/);
       assert.match(result.stdout, /Integration complete for standalone issue #42\./);
       assert.match(result.stdout, /SANDCASTLE RUN: COMPLETED/);
@@ -1600,25 +1397,40 @@ fi
           0o777,
         0o700
       );
-      const merger = captures.find((entry) => entry.name?.includes("merger"));
-      assert.equal(merger.recoveryMode, 0o600);
-      assert.equal(merger.recoveryState.baseBranch, "main");
-      assert.equal(merger.recoveryState.reviewedBranch, "sandcastle/issue-42");
-      assert.match(
-        merger.recoveryState.verificationWorktreePath,
-        /\.sandcastle\/worktrees\/sandcastle-merger-verify-issue-42$/
+      // One issue sandbox runs both agents and Integration; nothing runs in
+      // head mode, and the Reporter does not start.
+      assert.deepEqual(
+        captures.filter((entry) => entry.type === "sandbox").map((entry) => entry.branch),
+        ["sandcastle/issue-42"]
       );
-      assert.match(
-        merger.promptArgs.VERIFICATION_WORKTREE_PATH,
-        /^\/home\/agent\/workspace\/\.sandcastle\/worktrees\//
+      assert.equal(captures.some((entry) => entry.type === "head-run"), false);
+      assert.deepEqual(
+        phases.map((entry) => entry.name.split(":")[0]),
+        ["implementer", "reviewer"]
       );
-      assert.equal(
-        merger.promptArgs.VERIFICATION_WORKTREE_PATH.includes(consumerRoot),
-        false
+      const execs = captures
+        .filter((entry) => entry.type === "exec")
+        .map((entry) => entry.command);
+      assert.ok(
+        execs.some((command) => /^git -c core\.hooksPath=\/dev\/null rebase /.test(command)),
+        execs.join("\n")
       );
-      await assert.rejects(
-        access(path.join(consumerRoot, ".sandcastle", "merger-recovery.json"))
+      for (const command of Object.values(expected)) {
+        assert.ok(execs.includes(command), `${command} was not run: ${execs.join("\n")}`);
+      }
+      const { stdout: baseFiles } = await run("git", ["ls-tree", "-r", "--name-only", "main"], {
+        cwd: consumerRoot,
+      });
+      assert.ok(baseFiles.split("\n").includes("src/issue-42.js"));
+      const { stdout: branches } = await run("git", ["branch", "--list", "sandcastle/*"], {
+        cwd: consumerRoot,
+      });
+      assert.equal(branches.trim(), "");
+      assert.deepEqual(
+        await readdir(path.join(consumerRoot, ".sandcastle", "worktrees")),
+        []
       );
+      await assert.rejects(access(hookMarkerPath));
       assert.deepEqual(
         await readdir(
           path.join(consumerRoot, ".sandcastle", "node-modules-overlays")
@@ -1875,8 +1687,16 @@ fi
           diagnostic: /IMPLEMENTER_EFFORT must not be empty/,
         },
         {
-          contents: validConfig.replace("MERGER_MODEL=test-model\n", ""),
-          diagnostic: /missing required configuration: MERGER_MODEL/,
+          contents: validConfig.replace("REPORTER_MODEL=test-model\n", ""),
+          diagnostic: /missing required configuration: REPORTER_MODEL/,
+        },
+        {
+          contents: validConfig.replace("REPORTER_MODEL=", "MERGER_MODEL="),
+          diagnostic: /MERGER_MODEL was replaced by REPORTER_MODEL/,
+        },
+        {
+          contents: validConfig.replace("REPORTER_EFFORT=", "MERGER_EFFORT="),
+          diagnostic: /MERGER_EFFORT was replaced by REPORTER_EFFORT/,
         },
       ];
 
@@ -1898,6 +1718,37 @@ fi
       });
       assert.equal(missing.code, 1);
       assert.match(missing.stderr, /sandcastle\.env is required/);
+    });
+
+    it("rejects project guidance for the replaced merge prompts", async () => {
+      const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
+        "pnpm-replaced-guidance"
+      );
+      const environment = {
+        ...process.env,
+        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      };
+
+      for (const [oldFilename, newFilename] of [
+        ["merge-prompt.md", "report-prompt.md"],
+        ["standalone-merge-prompt.md", "standalone-report-prompt.md"],
+      ]) {
+        const oldPath = path.join(consumerRoot, ".sandcastle", oldFilename);
+        await writeFile(oldPath, "Old merger guidance.\n");
+        const error = await runExpectingFailure(shim, ["--dry-run"], {
+          cwd: consumerRoot,
+          env: environment,
+        });
+        assert.equal(error.code, 1);
+        assert.ok(
+          error.stderr.includes(
+            `.sandcastle/${oldFilename} was replaced by .sandcastle/${newFilename}`
+          ),
+          error.stderr
+        );
+        assert.doesNotMatch(error.stdout, /=== Sandcastle dry run ===/);
+        await rm(oldPath);
+      }
     });
 
     it("requires usable agent credentials only for runs that launch agents and never prints them", async () => {
@@ -1984,7 +1835,6 @@ fi
         ".sandcastle/logs/",
         ".sandcastle/worktrees/",
         ".sandcastle/node-modules-overlays/",
-        ".sandcastle/merger-recovery.json",
         ".sandcastle/run.lock",
       ];
 
@@ -2246,7 +2096,6 @@ fi
       assert.deepEqual(await readCapturedPhases(capturePath), [
         "implementer",
         "reviewer",
-        "merger",
       ]);
     });
 
@@ -2403,7 +2252,7 @@ fi
       { workPath: "standalone", fixture: { readyIssueLists: [[standaloneIssue("42")]] }, issueId: "42" },
       { workPath: "spec", fixture: specFixture, issueId: "11" },
     ]) {
-      it(`reports that the merger will rebase a reused ${workPath} branch that is behind the base`, async () => {
+      it(`reports that Integration will rebase a reused ${workPath} branch that is behind the base`, async () => {
         const { consumerRoot, shim, environment, baseCommit } = await prepareReusedBranch(
           `pnpm-reused-behind-${workPath}`,
           fixture,
@@ -2417,7 +2266,7 @@ fi
 
         assert.ok(
           result.stdout.includes(
-            `Info: sandcastle/issue-${issueId} is behind main at ${baseCommit}; the merger will rebase it onto main.`
+            `Info: sandcastle/issue-${issueId} is behind main at ${baseCommit}; Integration will rebase it onto main.`
           ),
           result.stdout
         );
@@ -2442,7 +2291,7 @@ fi
   describe("Dockerfile guard", () => {
     for (const { role, stopsBefore } of [
       { role: "implementer", stopsBefore: "reviewer" },
-      { role: "reviewer", stopsBefore: "merger" },
+      { role: "reviewer", stopsBefore: "reporter" },
     ]) {
       it(`aborts when the ${role} changes a Dockerfile`, async () => {
         const { consumerRoot, shim, environment, capturePath, fixturePath } =
@@ -2466,51 +2315,433 @@ fi
         assert.deepEqual(await readClosedIssues(fixturePath), []);
       });
     }
+  });
 
-    it("fast-forwards the base and closes the issue after merger verification fixes", async () => {
-      const { consumerRoot, shim, environment, fixturePath } =
-        await prepareWorkflowConsumer("pnpm-merger-fix", {
-          readyIssueLists: [[standaloneIssue("42")]],
+  describe("Integration", () => {
+    // An earlier run left a committed implementation on the issue branch that
+    // changes shared.txt; the base then changed shared.txt differently.
+    async function prepareConflict(manager) {
+      const prepared = await prepareWorkflowConsumer(manager, {
+        readyIssueLists: [[standaloneIssue("42")]],
+      });
+      const { consumerRoot } = prepared;
+      const git = (...args) => run("git", args, { cwd: consumerRoot });
+      await writeFile(path.join(consumerRoot, "shared.txt"), "original\n");
+      await git("add", "shared.txt");
+      await git("commit", "--quiet", "-m", "add shared file");
+      await git("switch", "--quiet", "-c", "sandcastle/issue-42");
+      await writeFile(path.join(consumerRoot, "shared.txt"), "from the branch\n");
+      await git("commit", "--quiet", "-am", "sandcastle(implementer): #42: change shared file");
+      await git("switch", "--quiet", "main");
+      await writeFile(path.join(consumerRoot, "shared.txt"), "from the base\n");
+      await git("commit", "--quiet", "-am", "change shared file on the base");
+      const branchCommit = (await git("rev-parse", "sandcastle/issue-42")).stdout.trim();
+      const baseCommit = (await git("rev-parse", "main")).stdout.trim();
+      return { ...prepared, git, branchCommit, baseCommit };
+    }
+
+    const reporterGuidance = "Name the owning team in every option.\n";
+
+    for (const manager of ["npm-conflict", "pnpm-conflict"]) {
+      it(`reports a rebase conflict and keeps the branch in a ${manager.split("-")[0]} consumer`, async () => {
+        const { consumerRoot, shim, environment, capturePath, fixturePath, git, branchCommit, baseCommit } =
+          await prepareConflict(manager);
+        await writeFile(
+          path.join(consumerRoot, ".sandcastle", "standalone-report-prompt.md"),
+          reporterGuidance
+        );
+
+        const error = await runExpectingFailure(shim, [], { cwd: consumerRoot, env: environment });
+
+        assert.equal(error.code, 3, error.stdout);
+        assert.deepEqual(await readCapturedPhases(capturePath), ["reviewer", "reporter"]);
+        const reporter = (await readFile(capturePath, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+          .find((entry) => entry.name?.startsWith("reporter"));
+        assert.equal(reporter.promptArgs.FAILURE_KIND, "rebase conflict");
+        assert.equal(reporter.promptArgs.REVIEWED_COMMIT, branchCommit);
+        assert.equal(reporter.promptArgs.BASE_COMMIT, baseCommit);
+        assert.match(reporter.promptArgs.FAILURE_DETAIL, /conflicts in: shared\.txt/);
+        assert.match(reporter.promptFile, /dist\/defaults\/prompts\/standalone-report-prompt\.md$/);
+        assert.equal(reporter.promptArgs.PROJECT_GUIDANCE, reporterGuidance);
+
+        // The report reaches the log directory, the issue, and the terminal.
+        const reportLog = (await readLogs(consumerRoot)).find(({ name }) =>
+          name.includes("integration-report")
+        );
+        assert.ok(reportLog, "no Integration Report log");
+        assert.match(reportLog.contents, /Integration failed: rebase conflict/);
+        assert.match(reportLog.contents, /conflicts in: shared\.txt/);
+        assert.match(reportLog.contents, /Option 1: resolve the conflict by hand/);
+        assert.ok(reportLog.contents.includes(`git rebase ${baseCommit}`));
+        assert.deepEqual(await readComments(fixturePath), [
+          { issue: "42", body: reportLog.contents },
+        ]);
+        assert.ok(error.stdout.includes("Option 1: resolve the conflict by hand"));
+        assert.match(error.stdout, /SANDCASTLE RUN: STOPPED/);
+
+        // The rebase was aborted: the branch is unchanged and no worktree is left.
+        assert.equal((await git("rev-parse", "sandcastle/issue-42")).stdout.trim(), branchCommit);
+        assert.equal((await git("rev-parse", "main")).stdout.trim(), baseCommit);
+        assert.deepEqual(await readdir(path.join(consumerRoot, ".sandcastle", "worktrees")), []);
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
+      });
+    }
+
+    // An earlier run left a reviewed implementation in branch.txt; the base
+    // then gained base.txt, so the rebase creates a new commit.
+    async function prepareBranchBehindBase(manager) {
+      const prepared = await prepareWorkflowConsumer(manager, {
+        readyIssueLists: [[standaloneIssue("42")]],
+      });
+      const { consumerRoot } = prepared;
+      const git = (...args) => run("git", args, { cwd: consumerRoot });
+      await git("switch", "--quiet", "-c", "sandcastle/issue-42");
+      await writeFile(path.join(consumerRoot, "branch.txt"), "branch\n");
+      await git("add", "branch.txt");
+      await git("commit", "--quiet", "-m", "sandcastle(reviewer): #42: reviewed implementation");
+      await git("switch", "--quiet", "main");
+      await writeFile(path.join(consumerRoot, "base.txt"), "base\n");
+      await git("add", "base.txt");
+      await git("commit", "--quiet", "-m", "base moves on");
+      const branchCommit = (await git("rev-parse", "sandcastle/issue-42")).stdout.trim();
+      const baseCommit = (await git("rev-parse", "main")).stdout.trim();
+      return { ...prepared, git, branchCommit, baseCommit };
+    }
+
+    async function readExecs(capturePath) {
+      return (await readFile(capturePath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.type === "exec")
+        .map((entry) => entry.command);
+    }
+
+    for (const manager of ["npm-verify-fail", "pnpm-verify-fail"]) {
+      it(`reports failed verification and keeps the reviewed branch in a ${manager.split("-")[0]} consumer`, async () => {
+        const { consumerRoot, shim, environment, capturePath, fixturePath, git, branchCommit, baseCommit } =
+          await prepareBranchBehindBase(manager);
+
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: { ...environment, FAKE_VERIFY_FAIL: "typecheck" },
         });
 
-      await run(shim, [], {
-        cwd: consumerRoot,
-        env: { ...environment, FAKE_AGENT_FILE_CHANGE: "merger:src/fix.js" },
+        assert.equal(error.code, 3, error.stdout);
+        assert.deepEqual(await readCapturedPhases(capturePath), ["reporter"]);
+        const execs = await readExecs(capturePath);
+        assert.equal(execs.some((command) => /^(npm|pnpm) test\b/.test(command)), false);
+        const reportLog = (await readLogs(consumerRoot)).find(({ name }) =>
+          name.includes("integration-report")
+        );
+        assert.match(reportLog.contents, /Integration failed: failed verification/);
+        assert.match(reportLog.contents, /typecheck step/);
+        assert.match(reportLog.contents, /src\/broken\.js:3/);
+        assert.equal((await readComments(fixturePath)).length, 1);
+        assert.ok(error.stdout.includes("Option 1: resolve the conflict by hand"));
+        // The branch never moved to the rebased commit.
+        assert.equal((await git("rev-parse", "sandcastle/issue-42")).stdout.trim(), branchCommit);
+        assert.equal((await git("rev-parse", "main")).stdout.trim(), baseCommit);
+        assert.deepEqual(await readdir(path.join(consumerRoot, ".sandcastle", "worktrees")), []);
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
       });
+    }
 
-      const { stdout: baseFiles } = await run("git", ["ls-tree", "-r", "--name-only", "main"], {
-        cwd: consumerRoot,
-      });
-      assert.ok(baseFiles.split("\n").includes("src/fix.js"));
-      assert.deepEqual(await readClosedIssues(fixturePath), ["42"]);
-    });
-
-    it("aborts before the base moves when the merger changes a Dockerfile", async () => {
-      const { consumerRoot, shim, environment, fixturePath } =
-        await prepareWorkflowConsumer("pnpm-dockerfile-merger", {
-          readyIssueLists: [[standaloneIssue("42")]],
-        });
-      const { stdout: baseBefore } = await run("git", ["rev-parse", "main"], {
-        cwd: consumerRoot,
-      });
+    it("restores the branch when verification leaves a tracked file changed", async () => {
+      const { consumerRoot, shim, environment, git, branchCommit } =
+        await prepareBranchBehindBase("pnpm-verify-dirty");
 
       const error = await runExpectingFailure(shim, [], {
         cwd: consumerRoot,
-        env: { ...environment, FAKE_AGENT_FILE_CHANGE: "merger:Dockerfile" },
+        env: { ...environment, FAKE_TEST_WRITES: "base.txt" },
       });
 
-      const banner = "ABORTING RUN: merger for issue #42 changed Dockerfile(s): Dockerfile.";
-      assert.equal(error.code, 1);
-      assert.ok(`${error.stdout}\n${error.stderr}`.includes(banner));
-      const logs = await readLogs(consumerRoot);
-      assert.ok(
-        logs.some(({ name, contents }) => name.includes("merger") && contents.includes(banner))
+      assert.equal(error.code, 3, error.stdout);
+      assert.match(error.stdout, /left uncommitted changes in the issue worktree/);
+      assert.equal((await git("rev-parse", "sandcastle/issue-42")).stdout.trim(), branchCommit);
+      assert.deepEqual(await readdir(path.join(consumerRoot, ".sandcastle", "worktrees")), []);
+    });
+
+    for (const { action, env, diagnostic } of [
+      {
+        action: "commits",
+        env: { FAKE_REPORTER_ACTION: "commit" },
+        diagnostic: /the Reporter for standalone issue #42 changed the issue worktree/,
+      },
+      {
+        action: "changes the worktree",
+        env: { FAKE_REPORTER_ACTION: "dirty" },
+        diagnostic: /the Reporter for standalone issue #42 changed the issue worktree/,
+      },
+      {
+        action: "moves a ref",
+        env: { FAKE_AGENT_UPDATE_REF: "reporter:refs/heads/elsewhere" },
+        diagnostic: /guarded refs changed during the reporter phase[\s\S]*git update-ref -d refs\/heads\/elsewhere/,
+      },
+    ]) {
+      it(`aborts with status 1 when the Reporter ${action}`, async () => {
+        const { consumerRoot, shim, environment, fixturePath, git, baseCommit } =
+          await prepareBranchBehindBase(`pnpm-reporter-${action.replaceAll(" ", "-")}`);
+
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: { ...environment, FAKE_VERIFY_FAIL: "test", ...env },
+        });
+
+        assert.equal(error.code, 1, error.stdout);
+        assert.match(error.stderr, diagnostic);
+        assert.equal((await git("rev-parse", "main")).stdout.trim(), baseCommit);
+        assert.deepEqual(await readComments(fixturePath), []);
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
+      });
+    }
+
+    it("rebases and verifies again when the base moves before the fast-forward", async () => {
+      const { consumerRoot, shim, environment, capturePath, fixturePath, git } =
+        await prepareWorkflowConsumer("pnpm-base-moves-once", {
+          readyIssueLists: [[standaloneIssue("42")]],
+        });
+
+      const result = await run(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_MOVE_BASE_ON_TEST: "1" },
+      });
+
+      assert.match(result.stdout, /Integration complete for standalone issue #42/);
+      assert.match(result.stderr, /main moved during Integration.*retry 1 of 3/);
+      const tests = (await readExecs(capturePath)).filter((command) => command === "pnpm test");
+      assert.equal(tests.length, 2);
+      const { stdout: log } = await run("git", ["log", "--format=%s", "main"], { cwd: consumerRoot });
+      assert.match(log, /fake implementation\nbase moves on\n/);
+      assert.deepEqual(await readClosedIssues(fixturePath), ["42"]);
+    });
+
+    it("keeps the reviewed commit when a retry after a moved base conflicts", async () => {
+      const { consumerRoot, shim, environment, capturePath, git, branchCommit } =
+        await prepareBranchBehindBase("pnpm-retry-conflict");
+
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: {
+          ...environment,
+          FAKE_MOVE_BASE_ON_TEST: "1",
+          FAKE_BASE_MOVE_FILE: "branch.txt:from the base",
+        },
+      });
+
+      assert.equal(error.code, 3, error.stdout);
+      assert.deepEqual(await readCapturedPhases(capturePath), ["reporter"]);
+      assert.equal((await git("rev-parse", "sandcastle/issue-42")).stdout.trim(), branchCommit);
+      const reportLog = (await readLogs(consumerRoot)).find(({ name }) =>
+        name.includes("integration-report")
       );
-      const { stdout: baseAfter } = await run("git", ["rev-parse", "main"], {
+      assert.ok(reportLog.contents.includes(`unchanged at \`${branchCommit}\``));
+    });
+
+    it("leaves the reviewed commit on the branch after the retries run out", async () => {
+      const { consumerRoot, shim, environment, git, branchCommit } =
+        await prepareBranchBehindBase("pnpm-retry-exhausted-branch");
+
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_MOVE_BASE_ON_TEST: "100" },
+      });
+
+      assert.equal(error.code, 3, error.stdout);
+      assert.equal((await git("rev-parse", "sandcastle/issue-42")).stdout.trim(), branchCommit);
+    });
+
+    for (const manager of ["npm-base-keeps-moving", "pnpm-base-keeps-moving"]) {
+      it(`stops with status 3 after three retries when the base keeps moving in a ${manager.split("-")[0]} consumer`, async () => {
+        const { consumerRoot, shim, environment, capturePath, fixturePath } =
+          await prepareWorkflowConsumer(manager, {
+            readyIssueLists: [[standaloneIssue("42")]],
+          });
+
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: { ...environment, FAKE_MOVE_BASE_ON_TEST: "100" },
+        });
+
+        assert.equal(error.code, 3, error.stdout);
+        assert.match(error.stderr, /gave up after 3 retries/);
+        const tests = (await readExecs(capturePath)).filter((command) =>
+          /^(npm|pnpm) test$/.test(command)
+        );
+        assert.equal(tests.length, 4);
+        assert.deepEqual(await readCapturedPhases(capturePath), ["implementer", "reviewer"]);
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
+      });
+    }
+  });
+
+  describe("ref guard", () => {
+    for (const manager of ["npm-ref-guard", "pnpm-ref-guard"]) {
+      it(`aborts with restore commands when the implementer creates a branch in a ${manager.split("-")[0]} consumer`, async () => {
+        const { consumerRoot, shim, environment, capturePath, fixturePath } =
+          await prepareWorkflowConsumer(manager, {
+            readyIssueLists: [[standaloneIssue("42")]],
+          });
+
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: { ...environment, FAKE_AGENT_UPDATE_REF: "implementer:refs/heads/other" },
+        });
+
+        assert.equal(error.code, 1, error.stdout);
+        assert.match(error.stderr, /guarded refs changed during the implementer phase/);
+        assert.match(error.stderr, /refs\/heads\/other: \(absent\) → [0-9a-f]{40}/);
+        assert.match(error.stderr, /git update-ref -d refs\/heads\/other/);
+        // Nothing is restored automatically.
+        await run("git", ["rev-parse", "--verify", "refs/heads/other"], { cwd: consumerRoot });
+        assert.deepEqual(await readCapturedPhases(capturePath), ["implementer"]);
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
+      });
+    }
+
+    it("prints the old commit for a moved tag", async () => {
+      const { consumerRoot, shim, environment } = await prepareWorkflowConsumer(
+        "pnpm-ref-guard-tag",
+        { readyIssueLists: [[standaloneIssue("42")]] }
+      );
+      await run("git", ["tag", "v1"], { cwd: consumerRoot });
+      const { stdout: tagCommit } = await run("git", ["rev-parse", "v1"], { cwd: consumerRoot });
+
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_AGENT_UPDATE_REF: "reviewer:refs/tags/v1" },
+      });
+
+      assert.equal(error.code, 1, error.stdout);
+      assert.match(error.stderr, /during the reviewer phase/);
+      assert.ok(error.stderr.includes(`git update-ref refs/tags/v1 ${tagCommit.trim()}`));
+    });
+
+    it("ignores remote-tracking refs", async () => {
+      const { consumerRoot, shim, environment, fixturePath } = await prepareWorkflowConsumer(
+        "pnpm-ref-guard-remote",
+        { readyIssueLists: [[standaloneIssue("42")]] }
+      );
+
+      const result = await run(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_AGENT_UPDATE_REF: "implementer:refs/remotes/origin/feature" },
+      });
+
+      assert.match(result.stdout, /Integration complete for standalone issue #42/);
+      assert.deepEqual(await readClosedIssues(fixturePath), ["42"]);
+    });
+  });
+
+  describe("final spec review", () => {
+    // Spec 100 has one closed child, so the run goes straight to final review.
+    const finalReviewFixture = {
+      readyIssueLists: [
+        [{ id: "100", title: "Spec", createdAt: "2026-01-01T00:00:00Z", parentId: null }],
+      ],
+      subIssues: { 100: [{ number: 101, title: "Child", state: "closed", labels: [] }] },
+      parents: { 101: "100" },
+      blocking: { 101: ["100"] },
+      closed: ["101"],
+    };
+
+    async function readSandboxBranches(capturePath) {
+      return (await readFile(capturePath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.type === "sandbox")
+        .map((entry) => entry.branch);
+    }
+
+    for (const manager of ["npm-final-review-branch", "pnpm-final-review-branch"]) {
+      it(`reviews on a temporary branch that is deleted afterwards in a ${manager.split("-")[0]} consumer`, async () => {
+        const { consumerRoot, shim, environment, capturePath, fixturePath } =
+          await prepareWorkflowConsumer(manager, finalReviewFixture);
+
+        const result = await run(shim, [], { cwd: consumerRoot, env: environment });
+
+        assert.match(result.stdout, /Spec #100 passed final review and closed/);
+        assert.deepEqual(await readSandboxBranches(capturePath), ["sandcastle/final-spec-100"]);
+        const captures = (await readFile(capturePath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+        assert.equal(captures.some((entry) => entry.type === "head-run"), false);
+        const sandbox = captures.find((entry) => entry.type === "sandbox");
+        assert.equal(
+          sandbox.hooks.sandbox.onSandboxReady.at(-1).command,
+          manager.startsWith("npm") ? "npm ci" : "pnpm install --frozen-lockfile"
+        );
+        const { stdout: branches } = await run("git", ["branch", "--list", "sandcastle/*"], {
+          cwd: consumerRoot,
+        });
+        assert.equal(branches.trim(), "");
+        assert.deepEqual(await readdir(path.join(consumerRoot, ".sandcastle", "worktrees")), []);
+        assert.deepEqual(await readClosedIssues(fixturePath), ["100"]);
+      });
+    }
+
+    it("aborts with status 1 when the final spec reviewer commits, and the commit never reaches the base", async () => {
+      const { consumerRoot, shim, environment, fixturePath } = await prepareWorkflowConsumer(
+        "pnpm-final-review-commit",
+        finalReviewFixture
+      );
+      const { stdout: baseBefore } = await run("git", ["rev-parse", "main"], { cwd: consumerRoot });
+
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_AGENT_FILE_CHANGE: "final-spec-reviewer:src/late.js" },
+      });
+
+      assert.equal(error.code, 1, error.stdout);
+      assert.match(error.stderr, /final spec reviewer for spec #100 committed on sandcastle\/final-spec-100/);
+      const { stdout: baseAfter } = await run("git", ["rev-parse", "main"], { cwd: consumerRoot });
+      assert.equal(baseAfter, baseBefore);
+      const { stdout: baseFiles } = await run("git", ["ls-tree", "-r", "--name-only", "main"], {
         cwd: consumerRoot,
       });
-      assert.equal(baseAfter, baseBefore);
-      assert.deepEqual(await readClosedIssues(fixturePath), []);
+      assert.equal(baseFiles.split("\n").includes("src/late.js"), false);
+      assert.deepEqual(await readdir(path.join(consumerRoot, ".sandcastle", "worktrees")), []);
+      // The run fails even though the reviewer closed the spec.
+      assert.deepEqual(await readClosedIssues(fixturePath), ["100"]);
+    });
+
+    for (const outcome of ["open", "not-ready", "stopped"]) {
+      it(`stops with status 3 when the final spec reviewer reports ${outcome}`, async () => {
+        const { consumerRoot, shim, environment, fixturePath } = await prepareWorkflowConsumer(
+          `pnpm-final-review-${outcome}`,
+          finalReviewFixture
+        );
+
+        const error = await runExpectingFailure(shim, [], {
+          cwd: consumerRoot,
+          env: { ...environment, FAKE_FINAL_REVIEW_OUTCOME: outcome },
+        });
+
+        assert.equal(error.code, 3, error.stdout);
+        assert.ok(error.stderr.includes(`Final spec reviewer for spec #100 outcome: ${outcome}. Reason: fake ${outcome}`));
+        assert.deepEqual(await readClosedIssues(fixturePath), []);
+        const { stdout: branches } = await run("git", ["branch", "--list", "sandcastle/*"], {
+          cwd: consumerRoot,
+        });
+        assert.equal(branches.trim(), "");
+      });
+    }
+
+    it("fails when GitHub disagrees with the reported closure", async () => {
+      const { consumerRoot, shim, environment } = await prepareWorkflowConsumer(
+        "pnpm-final-review-mismatch",
+        finalReviewFixture
+      );
+      // The reviewer reports closure but never closes the spec.
+      const error = await runExpectingFailure(shim, [], {
+        cwd: consumerRoot,
+        env: { ...environment, FAKE_FINAL_REVIEW_OUTCOME: "closed", FAKE_FINAL_REVIEW_SKIP_CLOSE: "1" },
+      });
+
+      assert.equal(error.code, 1, error.stdout);
+      assert.match(error.stderr, /Final reviewer reported closure, but spec issue #100 remains open/);
     });
   });
 });

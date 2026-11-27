@@ -10,6 +10,8 @@ export type PhaseFailure = {
 export type AgentPhaseResult<T extends string> = {
   outcome: T;
   detail?: string;
+  // The agent's complete output, for phases that report more than an outcome.
+  stdout: string;
 };
 
 export function formatPhaseFailure({
@@ -98,6 +100,7 @@ export async function runAgentPhase<T extends string>({
     return {
       outcome: parsePhaseOutcome(result.stdout, allowedOutcomes),
       detail,
+      stdout: result.stdout,
     };
   } catch (error) {
     const phaseError = new Error(

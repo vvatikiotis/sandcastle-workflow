@@ -10,12 +10,21 @@ import {
 export const promptFilenames = [
   "implement-prompt.md",
   "review-prompt.md",
-  "merge-prompt.md",
+  "report-prompt.md",
   "standalone-implement-prompt.md",
   "standalone-review-prompt.md",
-  "standalone-merge-prompt.md",
+  "standalone-report-prompt.md",
   "final-spec-prompt.md",
 ] as const;
+
+// Project Guidance files an earlier version read, and the file that replaced
+// each.
+const replacedGuidanceFilenames: ReadonlyArray<
+  readonly [string, PromptFilename]
+> = [
+  ["merge-prompt.md", "report-prompt.md"],
+  ["standalone-merge-prompt.md", "standalone-report-prompt.md"],
+];
 
 export type PromptFilename = (typeof promptFilenames)[number];
 
@@ -118,11 +127,33 @@ export type PromptFiles = {
   selections: readonly PromptSelection[];
 };
 
+// Stops preflight when the project still has guidance for a replaced prompt,
+// so that guidance is not silently ignored.
+async function rejectReplacedGuidance(projectRoot: string): Promise<void> {
+  for (const [oldFilename, newFilename] of replacedGuidanceFilenames) {
+    const guidancePath = path.join(projectRoot, ".sandcastle", oldFilename);
+    try {
+      await lstat(guidancePath);
+    } catch (error) {
+      if (getErrorCode(error) === "ENOENT") {
+        continue;
+      }
+      throw new Error(`Could not inspect project guidance ${oldFilename}.`, {
+        cause: error,
+      });
+    }
+    throw new Error(
+      `Project guidance .sandcastle/${oldFilename} was replaced by .sandcastle/${newFilename}. The merger no longer exists: the runner integrates, and the Reporter explains failed Integrations. Move any guidance that still applies to .sandcastle/${newFilename}, then delete .sandcastle/${oldFilename}.`,
+    );
+  }
+}
+
 export async function resolvePromptFiles(options: {
   projectRoot: string;
   workflowRoot: string;
 }): Promise<PromptFiles> {
   const canonicalProjectRoot = await realpath(options.projectRoot);
+  await rejectReplacedGuidance(canonicalProjectRoot);
   const selections = await Promise.all(
     promptFilenames.map((filename) =>
       resolvePromptSelection({

@@ -9,7 +9,7 @@ export type AgentRoleConfig = { model: string; effort: string };
 export type AgentConfig = {
   implementer: AgentRoleConfig;
   reviewer: AgentRoleConfig;
-  merger: AgentRoleConfig;
+  reporter: AgentRoleConfig;
   finalSpecReviewer: AgentRoleConfig;
 };
 
@@ -24,13 +24,18 @@ const runnerConfigKeys = [
   "IMPLEMENTER_EFFORT",
   "REVIEWER_MODEL",
   "REVIEWER_EFFORT",
-  "MERGER_MODEL",
-  "MERGER_EFFORT",
+  "REPORTER_MODEL",
+  "REPORTER_EFFORT",
   "FINAL_SPEC_REVIEWER_MODEL",
   "FINAL_SPEC_REVIEWER_EFFORT",
   "MAX_ITERATIONS",
 ] as const;
 const optionalRunnerConfigKeys = ["DOCKER_IMAGE"] as const;
+// Keys an earlier version used, and the key that replaced each.
+const replacedRunnerConfigKeys: Readonly<Record<string, string>> = {
+  MERGER_MODEL: "REPORTER_MODEL",
+  MERGER_EFFORT: "REPORTER_EFFORT",
+};
 
 type RunnerConfigKey = (typeof runnerConfigKeys)[number];
 type OptionalRunnerConfigKey = (typeof optionalRunnerConfigKeys)[number];
@@ -42,8 +47,8 @@ const runnerConfigSchema = z.object({
   IMPLEMENTER_EFFORT: z.string(),
   REVIEWER_MODEL: z.string(),
   REVIEWER_EFFORT: z.string(),
-  MERGER_MODEL: z.string(),
-  MERGER_EFFORT: z.string(),
+  REPORTER_MODEL: z.string(),
+  REPORTER_EFFORT: z.string(),
   FINAL_SPEC_REVIEWER_MODEL: z.string(),
   FINAL_SPEC_REVIEWER_EFFORT: z.string(),
   MAX_ITERATIONS: z.string(),
@@ -128,6 +133,12 @@ export async function loadRunnerConfig(
     }
 
     const key = trimmedLine.slice(0, separatorIndex).trim();
+    const replacement = replacedRunnerConfigKeys[key];
+    if (replacement !== undefined) {
+      throw new Error(
+        `${runnerConfigPath}:${lineNumber}: ${key} was replaced by ${replacement}. Rename the key to ${replacement}; it configures the Reporter, which explains failed Integrations.`,
+      );
+    }
     if (!isRunnerConfigEntryKey(key)) {
       throw new Error(
         `${runnerConfigPath}:${lineNumber}: unknown configuration key ${key}.`,
@@ -190,9 +201,9 @@ export function getAgentConfig(runnerConfig: RunnerConfig): AgentConfig {
       model: runnerConfig.REVIEWER_MODEL,
       effort: runnerConfig.REVIEWER_EFFORT,
     },
-    merger: {
-      model: runnerConfig.MERGER_MODEL,
-      effort: runnerConfig.MERGER_EFFORT,
+    reporter: {
+      model: runnerConfig.REPORTER_MODEL,
+      effort: runnerConfig.REPORTER_EFFORT,
     },
     finalSpecReviewer: {
       model: runnerConfig.FINAL_SPEC_REVIEWER_MODEL,

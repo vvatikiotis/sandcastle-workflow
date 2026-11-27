@@ -145,7 +145,6 @@ export async function validateEffectiveIgnoreBehavior(
     ".sandcastle/logs/",
     ".sandcastle/worktrees/",
     ".sandcastle/node-modules-overlays/",
-    ".sandcastle/merger-recovery.json",
     ".sandcastle/run.lock",
   ];
   const { stdout: trackedProtectedPathsOutput } = await execFile("git", [

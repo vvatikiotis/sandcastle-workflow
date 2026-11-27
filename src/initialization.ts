@@ -9,7 +9,6 @@ const ignoreContents = [
   "logs/",
   "worktrees/",
   "node-modules-overlays/",
-  "merger-recovery.json",
   "run.lock",
   "",
 ].join("\n");
@@ -20,8 +19,8 @@ const runnerConfigExample = [
   "IMPLEMENTER_EFFORT=",
   "REVIEWER_MODEL=",
   "REVIEWER_EFFORT=",
-  "MERGER_MODEL=",
-  "MERGER_EFFORT=",
+  "REPORTER_MODEL=",
+  "REPORTER_EFFORT=",
   "FINAL_SPEC_REVIEWER_MODEL=",
   "FINAL_SPEC_REVIEWER_EFFORT=",
   "MAX_ITERATIONS=",

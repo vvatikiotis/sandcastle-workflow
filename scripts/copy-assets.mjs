@@ -4,10 +4,10 @@ import path from "node:path";
 const expectedPrompts = [
   "final-spec-prompt.md",
   "implement-prompt.md",
-  "merge-prompt.md",
+  "report-prompt.md",
   "review-prompt.md",
   "standalone-implement-prompt.md",
-  "standalone-merge-prompt.md",
+  "standalone-report-prompt.md",
   "standalone-review-prompt.md",
 ];
 

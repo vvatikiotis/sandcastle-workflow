@@ -7,8 +7,8 @@ import { describe, it } from "node:test";
 import {
   cleanupStaleNodeModulesOverlays,
   createNodeModulesOverlay,
+  closeSandboxWithNodeModulesOverlay,
   removeNodeModulesOverlay,
-  withNodeModulesOverlay,
 } from "../src/node-modules-overlay.ts";
 
 async function createOverlayRoot() {
@@ -41,64 +41,76 @@ describe("node_modules overlays", () => {
     }
   });
 
-  it("removes an overlay after the sandbox lifecycle completes", async () => {
+  it("removes an overlay after its sandbox closes", async () => {
     const rootDirectory = await createOverlayRoot();
 
     try {
-      let overlayDirectory;
-      await withNodeModulesOverlay(
-        { rootDirectory, sandboxPath: "node_modules" },
-        async (overlay) => {
-          overlayDirectory = overlay.directory;
-        }
+      const overlay = await createNodeModulesOverlay({
+        rootDirectory,
+        sandboxPath: "node_modules",
+      });
+      const closeResult = await closeSandboxWithNodeModulesOverlay(
+        { close: async () => ({ preservedWorktreePath: "/kept" }) },
+        overlay
       );
 
-      assert.equal(await directoryExists(overlayDirectory), false);
+      assert.deepEqual(closeResult, { preservedWorktreePath: "/kept" });
+      assert.equal(await directoryExists(overlay.directory), false);
     } finally {
       await rm(rootDirectory, { recursive: true, force: true });
     }
   });
 
-  it("removes an overlay after an operation fails", async () => {
+  it("removes an overlay after its sandbox fails to close", async () => {
     const rootDirectory = await createOverlayRoot();
-    const operationError = new Error("agent failed");
+    const closeError = new Error("close failed");
 
     try {
-      let overlayDirectory;
+      const overlay = await createNodeModulesOverlay({
+        rootDirectory,
+        sandboxPath: "node_modules",
+      });
       await assert.rejects(
-        withNodeModulesOverlay(
-          { rootDirectory, sandboxPath: "node_modules" },
-          async (overlay) => {
-            overlayDirectory = overlay.directory;
-            throw operationError;
-          }
+        closeSandboxWithNodeModulesOverlay(
+          {
+            close: async () => {
+              throw closeError;
+            },
+          },
+          overlay
         ),
-        operationError
+        closeError
       );
 
-      assert.equal(await directoryExists(overlayDirectory), false);
+      assert.equal(await directoryExists(overlay.directory), false);
     } finally {
       await rm(rootDirectory, { recursive: true, force: true });
     }
   });
 
-  it("reports both operation and cleanup failures", async () => {
+  it("reports both close and cleanup failures", async () => {
     const rootDirectory = await createOverlayRoot();
-    const operationError = new Error("agent failed");
+    const closeError = new Error("close failed");
 
     try {
+      const overlay = await createNodeModulesOverlay({
+        rootDirectory,
+        sandboxPath: "node_modules",
+      });
       await assert.rejects(
-        withNodeModulesOverlay(
-          { rootDirectory, sandboxPath: "node_modules" },
-          async () => {
-            await chmod(rootDirectory, 0o500);
-            throw operationError;
-          }
+        closeSandboxWithNodeModulesOverlay(
+          {
+            close: async () => {
+              await chmod(rootDirectory, 0o500);
+              throw closeError;
+            },
+          },
+          overlay
         ),
         (error) => {
           assert.ok(error instanceof AggregateError);
           assert.equal(error.errors.length, 2);
-          assert.equal(error.errors[0], operationError);
+          assert.equal(error.errors[0], closeError);
           return true;
         }
       );

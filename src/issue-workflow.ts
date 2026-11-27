@@ -1,22 +1,38 @@
 import chalk from "chalk";
-import { appendFile } from "node:fs/promises";
-import path from "node:path";
+import { appendFile, writeFile } from "node:fs/promises";
 
-import type { IssueSandbox } from "./agent-runtime.ts";
+import type { AgentSandbox } from "./agent-runtime.ts";
 import type { BaseSnapshot } from "./git-state.ts";
+import {
+  fingerprintWorktree,
+  rebaseAndVerify,
+  resetIssueBranch,
+  restoreIssueBranch,
+  type IntegrationLog,
+} from "./integration.ts";
 import { reportPhaseFailure } from "./phase-diagnostics.ts";
 import type { PromptFilename } from "./prompt-resolution.ts";
 import { isReviewerCommitMessageForIssue } from "./recovery-routing.ts";
+import {
+  formatRefChanges,
+  snapshotGuardedRefs,
+  type RefGuard,
+} from "./ref-guard.ts";
 import { formatDiagnostic } from "./run-completion.ts";
 import type { RunContext } from "./run-context.ts";
 import type { ReadyIssue, SpecChild } from "./spec-selection.ts";
-import { getVerificationWorktreePaths } from "./verification-worktree-paths.ts";
 
 export type WorkPath = "spec" | "standalone";
 
 type ImplementerOutcome = "implemented" | "needs-info" | "stopped";
 type ReviewerOutcome = "approved" | "needs-info" | "stopped";
-type MergerOutcome = "merged" | "needs-info" | "stopped";
+type ReporterOutcome = "reported";
+
+// The agent phases after which the ref guard runs.
+type GuardedPhase = "implementer" | "reviewer" | "reporter";
+// Integration retries the rebase and verification this many times when the
+// Base Branch moves before the fast-forward.
+const integrationRetries = 3;
 
 // What differs between the two Work Paths. Every step and message of the
 // issue workflow is otherwise shared.
@@ -26,11 +42,12 @@ export type WorkPathProfile = {
   prompts: {
     implement: PromptFilename;
     review: PromptFilename;
-    merge: PromptFilename;
+    report: PromptFilename;
   };
   // Added to every agent prompt, for example SPEC_ISSUE_ID for a Child Issue.
   promptArgs: Record<string, string>;
-  // A reason when the issue lost Eligibility; checked before review and merge.
+  // A reason when the issue lost Eligibility; checked before review and
+  // Integration.
   getEligibilityError: (issueId: string) => Promise<string | undefined>;
 };
 
@@ -43,7 +60,7 @@ export function createSpecPathProfile(
     prompts: {
       implement: "implement-prompt.md",
       review: "review-prompt.md",
-      merge: "merge-prompt.md",
+      report: "report-prompt.md",
     },
     promptArgs: { SPEC_ISSUE_ID: specIssueId },
     getEligibilityError: (issueId) =>
@@ -59,7 +76,7 @@ export function createStandalonePathProfile({
     prompts: {
       implement: "standalone-implement-prompt.md",
       review: "standalone-review-prompt.md",
-      merge: "standalone-merge-prompt.md",
+      report: "standalone-report-prompt.md",
     },
     promptArgs: {},
     getEligibilityError: async (issueId) =>
@@ -82,6 +99,18 @@ type IssueRun = {
   issueLabel: string;
   branch: string;
   base: BaseSnapshot;
+  // Guards every ref except the issue branch. A failed Integration takes a
+  // new snapshot before the Reporter, so an earlier Base Branch move is not
+  // blamed on it.
+  refGuard: RefGuard;
+};
+
+// A rebase conflict or failed verification, as the Reporter receives it.
+type IntegrationFailure = {
+  cause: "rebase conflict" | "failed verification";
+  detail: string;
+  onto: string;
+  reviewedCommit: string;
 };
 
 function capitalize(text: string): string {
@@ -102,8 +131,14 @@ function promptArgsFor(
   };
 }
 
+function abort(reason: string): IssueStop {
+  console.error(reason);
+  process.exitCode = 1;
+  return { outcome: "aborted", reason };
+}
+
 async function throwIfDockerfileChanged(
-  role: "implementer" | "reviewer" | "merger",
+  changedBy: "implementer" | "reviewer" | "the issue branch",
   issueId: string,
   changedDockerfiles: readonly string[],
   logPath: string,
@@ -112,12 +147,24 @@ async function throwIfDockerfileChanged(
     return;
   }
 
-  const message = `ABORTING RUN: ${role} for issue #${issueId} changed Dockerfile(s): ${changedDockerfiles.join(", ")}.`;
+  const message = `ABORTING RUN: ${changedBy} for issue #${issueId} changed Dockerfile(s): ${changedDockerfiles.join(", ")}.`;
   await appendFile(
     logPath,
     `\n\n${"!".repeat(80)}\n${message}\n${"!".repeat(80)}\n`,
   );
   throw new Error(message);
+}
+
+// Stops the run when an agent phase changed a guarded ref.
+async function abortIfRefsChanged(
+  run: IssueRun,
+  role: GuardedPhase,
+): Promise<IssueStop | undefined> {
+  const changes = await run.refGuard.check();
+  if (changes.length === 0) {
+    return undefined;
+  }
+  return abort(formatRefChanges(`${role} phase for ${run.issueLabel}`, changes));
 }
 
 async function shouldSkipReviewerAfterRerun(
@@ -135,7 +182,7 @@ async function shouldSkipReviewerAfterRerun(
   }
 }
 
-// A reused branch keeps its stale base; the merger, not the runner, rebases it.
+// A reused branch keeps its stale base until Integration rebases it.
 async function reportReusedBranchBehindBase({
   context,
   branch,
@@ -146,13 +193,13 @@ async function reportReusedBranchBehindBase({
   }
 
   console.log(
-    `Info: ${branch} is behind ${base.branch} at ${base.commit}; the merger will rebase it onto ${base.branch}.`,
+    `Info: ${branch} is behind ${base.branch} at ${base.commit}; Integration will rebase it onto ${base.branch}.`,
   );
 }
 
 async function stopIfIneligible(
   run: IssueRun,
-  step: "review" | "merge",
+  step: "review" | "Integration",
 ): Promise<IssueStop | undefined> {
   const eligibilityError = await run.profile.getEligibilityError(run.issueId);
   if (eligibilityError === undefined) {
@@ -170,7 +217,7 @@ async function stopIfIneligible(
 
 async function runImplementer(
   run: IssueRun,
-  sandbox: IssueSandbox,
+  sandbox: AgentSandbox,
   branchCommitBeforeImplementation: string,
 ): Promise<IssueStop | undefined> {
   const { context, profile, branch, issueId, issueLabel } = run;
@@ -188,8 +235,13 @@ async function runImplementer(
     allowedOutcomes: ["implemented", "needs-info", "stopped"],
     promptFile: context.promptFiles.get(profile.prompts.implement),
     promptArgs: promptArgsFor(run, profile.prompts.implement, {}),
-    sandbox: { kind: "issue", sandbox },
+    sandbox,
   });
+
+  const refStop = await abortIfRefsChanged(run, "implementer");
+  if (refStop !== undefined) {
+    return refStop;
+  }
 
   const branchCommitAfterImplementation =
     await context.git.getBranchCommit(branch);
@@ -223,7 +275,7 @@ async function runImplementer(
 
 async function runReviewer(
   run: IssueRun,
-  sandbox: IssueSandbox,
+  sandbox: AgentSandbox,
 ): Promise<IssueStop | undefined> {
   const { context, profile, branch, issueId, issueLabel, base } = run;
   const logPath = await context.runtime.createLogPath(
@@ -244,8 +296,13 @@ async function runReviewer(
       BASE_COMMIT: base.commit,
       BRANCH: branch,
     }),
-    sandbox: { kind: "issue", sandbox },
+    sandbox,
   });
+
+  const refStop = await abortIfRefsChanged(run, "reviewer");
+  if (refStop !== undefined) {
+    return refStop;
+  }
 
   const branchCommitAfterReview = await context.git.getBranchCommit(branch);
   await throwIfDockerfileChanged(
@@ -276,7 +333,7 @@ async function runReviewer(
 // issue branch, then reviews it unless the Reviewer already finished.
 async function implementAndReview(
   run: IssueRun,
-  sandbox: IssueSandbox,
+  sandbox: AgentSandbox,
 ): Promise<IssueStop | undefined> {
   const { context, branch, issueId, base } = run;
   const branchCommitBeforeImplementation =
@@ -286,16 +343,16 @@ async function implementAndReview(
     base.commit,
   );
 
-  let jumpToMerger = false;
+  let skipReviewer = false;
   if (reusingImplementation) {
     console.log(
-      `Reusing committed implementation on ${branch}; checking whether to continue review or jump to merger.`,
+      `Reusing committed implementation on ${branch}; checking whether to continue review or go to Integration.`,
     );
     await reportReusedBranchBehindBase(run);
-    jumpToMerger = await shouldSkipReviewerAfterRerun(run);
-    if (jumpToMerger) {
+    skipReviewer = await shouldSkipReviewerAfterRerun(run);
+    if (skipReviewer) {
       console.log(
-        `Last commit appears to be from Sandcastle reviewer for #${issueId}; skipping reviewer and jumping to merger.`,
+        `Last commit appears to be from Sandcastle reviewer for #${issueId}; skipping reviewer and going to Integration.`,
       );
     } else {
       console.log(
@@ -318,176 +375,223 @@ async function implementAndReview(
     return reviewIneligible;
   }
 
-  return jumpToMerger ? undefined : runReviewer(run, sandbox);
+  return skipReviewer ? undefined : runReviewer(run, sandbox);
 }
 
-// Runs the Merger in its verification worktree. When the Merger does not
-// succeed, the runner recovers the base checkout before reporting the stop.
-async function runMerger(
+function parseIntegrationReport(stdout: string): string | undefined {
+  return [
+    ...stdout.matchAll(/<integration-report>([\s\S]*?)<\/integration-report>/g),
+  ]
+    .at(-1)?.[1]
+    ?.trim();
+}
+
+// Publishes the Integration Report to a log file, an issue comment, and the
+// terminal.
+async function publishIntegrationReport(
   run: IssueRun,
-  verificationWorktree: { hostPath: string; sandboxPath: string },
-  mergerLogPath: string,
-): Promise<IssueStop | undefined> {
-  const { context, profile, branch, issueLabel, base } = run;
-  const { mergerRecovery } = context;
-  let mergerOutcome: MergerOutcome = "stopped";
-  let mergerFailureReason = "";
-  let mergerSucceeded = false;
-  let mergerRecoveryFailed = false;
-  let mergerOperationError: unknown;
-
+  failure: IntegrationFailure,
+  report: string,
+): Promise<string> {
+  const { context, issueId, branch, base } = run;
+  const reportPath = await context.runtime.createLogPath(
+    `issue-${issueId}`,
+    "integration-report",
+  );
+  const body = [
+    `sandcastle(reporter): #${issueId}: Integration failed: ${failure.cause}`,
+    "",
+    `- Branch: \`${branch}\`, unchanged at \`${failure.reviewedCommit}\``,
+    `- Base Branch: \`${base.branch}\` at \`${failure.onto}\``,
+    "",
+    "## What the runner saw",
+    "",
+    "```text",
+    failure.detail,
+    "```",
+    "",
+    "## Integration Report",
+    "",
+    report,
+    "",
+  ].join("\n");
+  await writeFile(reportPath, body);
   try {
-    const merge = await context.runtime.runAgent<MergerOutcome>({
-      agentType: "merger",
-      roleConfig: context.agentConfig.merger,
-      branch: base.branch,
-      phase: "Merger",
-      context: issueLabel,
-      logPath: mergerLogPath,
-      allowedOutcomes: ["merged", "needs-info", "stopped"],
-      promptFile: context.promptFiles.get(profile.prompts.merge),
-      promptArgs: promptArgsFor(run, profile.prompts.merge, {
-        BASE_BRANCH: base.branch,
-        BASE_COMMIT: base.commit,
-        BRANCH: branch,
-        VERIFICATION_WORKTREE_PATH: verificationWorktree.sandboxPath,
-      }),
-      sandbox: {
-        kind: "head",
-        nodeModulesPath: path.posix.join(
-          verificationWorktree.sandboxPath,
-          "node_modules",
-        ),
-        hooks: "auth-only",
-      },
-    });
-
-    mergerOutcome = merge.outcome;
-    mergerSucceeded = mergerOutcome === "merged";
-    if (!mergerSucceeded) {
-      mergerFailureReason = reportPhaseFailure({
-        phase: `Merger for ${issueLabel}`,
-        outcome: mergerOutcome,
-        detail: merge.detail,
-        logPath: mergerLogPath,
-      });
-      if (
-        merge.detail &&
-        /base branch moved|base guard failed/i.test(merge.detail)
-      ) {
-        console.warn(
-          "The base branch may have changed because of a manual commit, cleanup/config commit, another Sandcastle process, or an automated hook or scheduled job.",
-        );
-      }
-    }
+    await context.controlPlane.commentOnIssue(issueId, reportPath);
   } catch (error) {
-    mergerOperationError = error;
-    throw error;
-  } finally {
-    if (!mergerSucceeded) {
-      const recovered = await mergerRecovery.recoverMergerState(
-        base.branch,
-        verificationWorktree.hostPath,
-      );
-
-      if (recovered) {
-        try {
-          await mergerRecovery.clearMergerRecoveryMarker();
-        } catch (markerError) {
-          mergerRecoveryFailed = true;
-          process.exitCode = 1;
-          if (mergerOperationError !== undefined) {
-            throw new AggregateError(
-              [mergerOperationError, markerError],
-              "Merger phase succeeded in recovery, but its marker could not be cleared.",
-            );
-          }
-          console.warn(
-            `WARNING: Merger recovery marker could not be cleared. Preserved ${mergerRecovery.mergerRecoveryPath}. ${formatDiagnostic(markerError)}`,
-          );
-        }
-      } else {
-        mergerRecoveryFailed = true;
-        process.exitCode = 1;
-        if (mergerOperationError !== undefined) {
-          throw new AggregateError(
-            [
-              mergerOperationError,
-              new Error(
-                `Merger recovery failed. Preserved ${mergerRecovery.mergerRecoveryPath}.`,
-              ),
-            ],
-            "Merger phase and recovery both failed.",
-          );
-        }
-      }
-    }
+    console.warn(
+      `WARNING: Could not post the Integration Report as a comment on issue #${issueId}. ${formatDiagnostic(error)}`,
+    );
   }
-
-  if (mergerSucceeded) {
-    return undefined;
-  }
-  if (mergerRecoveryFailed) {
-    return {
-      outcome: "aborted",
-      reason: `Merger recovery failed after outcome ${mergerOutcome}. Original phase result: ${mergerFailureReason}`,
-    };
-  }
-  return { outcome: "stopped", reason: mergerFailureReason };
+  console.log(`\n${body}`);
+  return reportPath;
 }
 
-// The merger only rebases, verifies, and commits on the reviewed branch. The
-// runner owns the base-branch update so that no agent commit reaches the base
-// branch before the Dockerfile guard has checked it.
-async function integrateReviewedBranch(
-  { context, issueId, base, branch }: IssueRun,
-  mergerLogPath: string,
-): Promise<void> {
-  const { git } = context;
-  const [baseCommit, branchCommit, checkedOutBranch] = await Promise.all([
-    git.getBranchCommit(base.branch),
-    git.getBranchCommit(branch),
-    git.getCheckedOutBranch(),
-  ]);
-
-  if (checkedOutBranch !== base.branch) {
-    throw new Error(
-      `Merger left ${checkedOutBranch} checked out instead of ${base.branch}.`,
-    );
-  }
-  if (baseCommit !== base.commit) {
-    throw new Error(
-      `${base.branch} moved from ${base.commit} to ${baseCommit} during the run; refusing to integrate ${branch}.`,
-    );
-  }
-  if (!(await git.isAncestorCommit(base.commit, branchCommit))) {
-    throw new Error(
-      `Merger reported success, but ${branch} is not rebased onto ${base.branch} at ${base.commit}.`,
-    );
-  }
-
-  // The captured base already contains every pre-run base change, so any
-  // Dockerfile in this diff came from an agent on the reviewed branch.
-  await throwIfDockerfileChanged(
-    "merger",
-    issueId,
-    await git.getChangedDockerfiles(base.commit, branchCommit),
-    mergerLogPath,
+// Runs the Reporter on the failed Integration, checks that it changed
+// nothing, restores the issue branch, and publishes the Integration Report.
+async function reportIntegrationFailure(
+  run: IssueRun,
+  sandbox: AgentSandbox,
+  failure: IntegrationFailure,
+  log: IntegrationLog,
+): Promise<IssueStop> {
+  const { context, profile, branch, issueId, issueLabel, base } = run;
+  console.warn(
+    `WARNING: Integration of ${issueLabel} failed: ${failure.cause}. Starting the Reporter.`,
+  );
+  const before = await fingerprintWorktree(sandbox, branch);
+  // No agent ran since the Reviewer's check, so a fresh snapshot accepts only
+  // Base Branch moves made before the Reporter starts.
+  run.refGuard = await snapshotGuardedRefs(context.git, [branch]);
+  const logPath = await context.runtime.createLogPath(
+    `issue-${issueId}`,
+    "reporter",
   );
 
-  await git.fastForwardTo(branch);
-  await context.controlPlane.closeIssue(issueId);
+  let stdout: string;
+  try {
+    const result = await context.runtime.runAgent<ReporterOutcome>({
+      agentType: "reporter",
+      roleConfig: context.agentConfig.reporter,
+      branch,
+      phase: "Reporter",
+      context: issueLabel,
+      logPath,
+      allowedOutcomes: ["reported"],
+      promptFile: context.promptFiles.get(profile.prompts.report),
+      promptArgs: promptArgsFor(run, profile.prompts.report, {
+        BASE_BRANCH: base.branch,
+        BASE_COMMIT: failure.onto,
+        BRANCH: branch,
+        REVIEWED_COMMIT: failure.reviewedCommit,
+        FAILURE_KIND: failure.cause,
+        FAILURE_DETAIL: failure.detail,
+      }),
+      sandbox,
+    });
+    stdout = result.stdout;
+  } catch (error) {
+    if ((await fingerprintWorktree(sandbox, branch)) === before) {
+      await restoreIssueBranch(sandbox, branch, log);
+    }
+    throw error;
+  }
+
+  const refStop = await abortIfRefsChanged(run, "reporter");
+  if (refStop !== undefined) {
+    return refStop;
+  }
+  if ((await fingerprintWorktree(sandbox, branch)) !== before) {
+    return abort(
+      `ABORTING RUN: the Reporter for ${issueLabel} changed the issue worktree, its HEAD, or ${branch}. Sandcastle left them as they are for inspection; the Base Branch is unchanged. Log: ${logPath}`,
+    );
+  }
+
+  await restoreIssueBranch(sandbox, branch, log);
+  const report =
+    parseIntegrationReport(stdout) ??
+    `The Reporter gave no Integration Report. See its log: ${logPath}`;
+  const reportPath = await publishIntegrationReport(run, failure, report);
+  return {
+    outcome: "stopped",
+    reason: `Integration of ${issueLabel} failed: ${failure.cause}. ${branch} is unchanged. Integration Report: ${reportPath}`,
+  };
 }
 
-// Takes one selected issue through Implementer → Reviewer → Merger →
-// Integration on either Work Path. Throws when a safety guard fails in a way
-// that recovery cannot contain, for example a Dockerfile change.
+// Runner-owned Integration in the issue sandbox: rebase the reviewed branch
+// onto the live Base Branch, verify it, and fast-forward the Base Branch on
+// the host. Returns undefined once the Base Branch has been fast-forwarded.
+async function integrate(
+  run: IssueRun,
+  sandbox: AgentSandbox,
+): Promise<IssueStop | undefined> {
+  const { context, branch, issueId, issueLabel, base } = run;
+  const { git } = context;
+  const logPath = await context.runtime.createLogPath(
+    `issue-${issueId}`,
+    "integration",
+  );
+  const log: IntegrationLog = (text) => appendFile(logPath, text);
+  const attempts = 1 + integrationRetries;
+  const reviewedCommit = await git.getBranchCommit(branch);
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const onto = await git.getBranchCommit(base.branch);
+    console.log(`Integration: rebasing ${branch} onto ${base.branch} at ${onto}.`);
+    const outcome = await rebaseAndVerify(sandbox, {
+      branch,
+      onto,
+      commands: context.verificationCommands,
+      log,
+    });
+    if (outcome.kind !== "verified") {
+      return reportIntegrationFailure(
+        run,
+        sandbox,
+        {
+          cause:
+            outcome.kind === "conflict"
+              ? "rebase conflict"
+              : "failed verification",
+          detail: outcome.detail,
+          onto,
+          reviewedCommit,
+        },
+        log,
+      );
+    }
+
+    // Covers commits a reused branch brought from an earlier run.
+    await throwIfDockerfileChanged(
+      "the issue branch",
+      issueId,
+      await git.getChangedDockerfiles(onto, outcome.commit),
+      logPath,
+    );
+    if (!(await git.hasSafeWorkingTree())) {
+      return abort("The base checkout has tracked working-tree changes.");
+    }
+
+    if ((await git.getBranchCommit(base.branch)) === onto) {
+      try {
+        await git.fastForwardTo(branch);
+        return undefined;
+      } catch (error) {
+        if ((await git.getBranchCommit(base.branch)) === onto) {
+          throw error;
+        }
+      }
+    }
+
+    // The branch goes back to the reviewed commit, so it points there again
+    // after any later failure.
+    await resetIssueBranch(sandbox, {
+      branch,
+      from: outcome.commit,
+      to: reviewedCommit,
+      log,
+    });
+    if (attempt < attempts) {
+      console.warn(
+        `WARNING: ${base.branch} moved during Integration of ${issueLabel}; rebasing and verifying again (retry ${attempt} of ${integrationRetries}).`,
+      );
+    }
+  }
+
+  const reason = `${base.branch} moved before every fast-forward of ${branch}; Integration of ${issueLabel} gave up after ${integrationRetries} retries. ${branch} is unchanged at the reviewed commit ${reviewedCommit}. Log: ${logPath}`;
+  console.warn(`WARNING: ${reason}`);
+  return { outcome: "stopped", reason };
+}
+
+// Takes one selected issue through Implementer → Reviewer → Integration on
+// either Work Path, in one issue sandbox. Throws when a safety guard fails in
+// a way the run cannot contain, for example a Dockerfile change.
 export async function runIssue(
   context: RunContext,
   issue: ReadyIssue | SpecChild,
   profile: WorkPathProfile,
 ): Promise<IssueRunResult> {
-  const { git, mergerRecovery, runtime, projectRoot } = context;
+  const { git, runtime } = context;
   const branch = `sandcastle/issue-${issue.id}`;
   const issueLabel = `${profile.issueNoun} #${issue.id}`;
   await runtime.requireDockerImage();
@@ -499,99 +603,42 @@ export async function runIssue(
     issueLabel,
     branch,
     base,
+    refGuard: await snapshotGuardedRefs(git, [branch]),
   };
 
   console.log(`Selected ${issueLabel}: ${issue.title}`);
   console.log(`Branch: ${branch}\n`);
 
-  const sandboxResult = await runtime.withIssueSandbox(branch, (sandbox) =>
-    implementAndReview(run, sandbox),
-  );
+  const sandboxResult = await runtime.withSandbox(branch, async (sandbox) => {
+    const reviewStop = await implementAndReview(run, sandbox);
+    if (reviewStop !== undefined) {
+      return reviewStop;
+    }
+    const integrationIneligible = await stopIfIneligible(run, "Integration");
+    if (integrationIneligible !== undefined) {
+      return integrationIneligible;
+    }
+    return integrate(run, sandbox);
+  });
+
+  const { preservedWorktreePath } = sandboxResult;
+  if (preservedWorktreePath !== undefined) {
+    console.warn(
+      `WARNING: Sandcastle preserved a dirty issue worktree at ${preservedWorktreePath}.`,
+    );
+  }
   if (sandboxResult.value !== undefined) {
     return sandboxResult.value;
   }
-
-  if (sandboxResult.preservedWorktreePath !== undefined) {
-    console.warn(
-      `WARNING: Sandcastle preserved a dirty issue worktree at ${sandboxResult.preservedWorktreePath}. Stopping before merge.`,
+  if (preservedWorktreePath !== undefined) {
+    return abort(
+      `${base.branch} was fast-forwarded to ${branch}, but ${issueLabel} was not closed because Sandcastle preserved its dirty issue worktree at ${preservedWorktreePath}.`,
     );
-    process.exitCode = 1;
-    return {
-      outcome: "aborted",
-      reason: "Sandcastle preserved a dirty issue worktree before merge.",
-    };
   }
 
-  if (!(await git.hasSafeWorkingTree())) {
-    process.exitCode = 1;
-    return {
-      outcome: "aborted",
-      reason: "The base checkout has tracked working-tree changes.",
-    };
-  }
-
-  const mergeIneligible = await stopIfIneligible(run, "merge");
-  if (mergeIneligible !== undefined) {
-    return mergeIneligible;
-  }
-
-  const verificationWorktree = getVerificationWorktreePaths(
-    projectRoot,
-    issue.id,
-  );
-  await mergerRecovery.writeMergerRecoveryMarker(
-    base.branch,
-    branch,
-    verificationWorktree.hostPath,
-  );
-
+  await context.controlPlane.closeIssue(issue.id);
   try {
-    await git.createMergerVerificationWorktree(
-      verificationWorktree.hostPath,
-      branch,
-    );
-  } catch (error) {
-    await mergerRecovery.recoverAfterMergerStepFailure(
-      "setup",
-      error,
-      base.branch,
-      verificationWorktree.hostPath,
-    );
-  }
-
-  const mergerLogPath = await runtime.createLogPath(
-    `issue-${issue.id}`,
-    "merger",
-  );
-  const mergerStop = await runMerger(run, verificationWorktree, mergerLogPath);
-  if (mergerStop !== undefined) {
-    return mergerStop;
-  }
-
-  if (
-    !(await mergerRecovery.removeVerificationWorktree(
-      verificationWorktree.hostPath,
-    ))
-  ) {
-    const reason = `${capitalize(issueLabel)} was not integrated because host verification-worktree cleanup failed.`;
-    console.warn(`WARNING: ${reason}`);
-    process.exitCode = 1;
-    return { outcome: "aborted", reason };
-  }
-
-  try {
-    await integrateReviewedBranch(run, mergerLogPath);
-  } catch (error) {
-    await mergerRecovery.recoverAfterMergerStepFailure(
-      "validation",
-      error,
-      base.branch,
-      verificationWorktree.hostPath,
-    );
-  }
-
-  try {
-    await git.deleteReviewedBranch(branch);
+    await git.deleteBranch(branch);
   } catch (error) {
     console.warn(
       `WARNING: ${capitalize(issueLabel)} was integrated and closed, but reviewed branch ${branch} could not be deleted.`,
@@ -604,7 +651,6 @@ export async function runIssue(
     };
   }
 
-  await mergerRecovery.clearMergerRecoveryMarker();
   console.log(chalk.green(`Integration complete for ${issueLabel}.`));
   return { outcome: "integrated" };
 }
