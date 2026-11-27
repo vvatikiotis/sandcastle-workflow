@@ -43,6 +43,8 @@ export type ControlPlane = {
   ) => Promise<StandaloneEligibilityError | undefined>;
   isIssueClosed: (issueId: string) => Promise<boolean>;
   closeIssue: (issueId: string) => Promise<void>;
+  // Posts the file's contents as an issue comment.
+  commentOnIssue: (issueId: string, bodyFile: string) => Promise<void>;
 };
 
 export function createControlPlane({
@@ -319,11 +321,19 @@ export function createControlPlane({
     await execFile("gh", ["issue", "close", issueId]);
   }
 
+  async function commentOnIssue(
+    issueId: string,
+    bodyFile: string,
+  ): Promise<void> {
+    await execFile("gh", ["issue", "comment", issueId, "--body-file", bodyFile]);
+  }
+
   return {
     getWorkCandidates,
     getSelectedIssueEligibilityError,
     getStandaloneEligibilityError,
     isIssueClosed,
     closeIssue,
+    commentOnIssue,
   };
 }

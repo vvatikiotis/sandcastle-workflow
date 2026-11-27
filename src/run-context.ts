@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import type { AgentRuntime } from "./agent-runtime.ts";
 import type { ControlPlane } from "./control-plane.ts";
 import type { GitState } from "./git-state.ts";
-import type { MergerRecovery } from "./merger-recovery.ts";
+import type { VerificationCommands } from "./integration.ts";
 import type { PromptFiles } from "./prompt-resolution.ts";
 import type { AgentConfig } from "./runner-config.ts";
 
@@ -28,8 +28,9 @@ export type RunContext = {
   promptFiles: PromptFiles;
   // INSTALL_COMMAND, TYPECHECK_COMMAND, and TEST_COMMAND for agent prompts.
   verificationPromptArgs: Record<string, string>;
+  // The same commands, which Integration runs on the rebased issue branch.
+  verificationCommands: VerificationCommands;
   git: GitState;
   controlPlane: ControlPlane;
-  mergerRecovery: MergerRecovery;
   runtime: AgentRuntime;
 };

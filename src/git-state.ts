@@ -1,18 +1,21 @@
-import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { getErrorCode } from "./error-code.ts";
-import { formatDiagnostic } from "./run-completion.ts";
 import type { Exec } from "./run-context.ts";
 
 export type BaseSnapshot = { branch: string; commit: string };
 
+// Disables repository hooks for a runner-owned git command. Agents' own
+// commits keep the repository's hooks.
+export const runnerGitPrefix = ["-c", "core.hooksPath=/dev/null"] as const;
+
+// A ref and the value it holds: a commit for a branch, tag, or stash, and the
+// symbolic target ("ref: refs/heads/main") or commit for HEAD.
+export type RefValue = { ref: string; value: string };
+
 export type GitState = {
   // Warns about untracked files; false when tracked changes are present.
   hasSafeWorkingTree: () => Promise<boolean>;
-  // False when an active rebase could not be aborted and was preserved.
-  abortRebase: (worktreePath: string) => Promise<boolean>;
-  getCheckedOutBranch: () => Promise<string>;
   getBranchCommit: (branch: string) => Promise<string>;
   hasCommitsBeyondBase: (branch: string, baseCommit: string) => Promise<boolean>;
   getChangedDockerfiles: (
@@ -24,16 +27,21 @@ export type GitState = {
   getBaseSnapshot: () => Promise<BaseSnapshot>;
   // Integration's base-branch update; fails unless it is a fast-forward.
   fastForwardTo: (branch: string) => Promise<void>;
-  deleteReviewedBranch: (branch: string) => Promise<void>;
-  createMergerVerificationWorktree: (
-    verificationWorktreePath: string,
-    branch: string,
-  ) => Promise<void>;
+  // Fails when the branch already exists.
+  createBranch: (branch: string, commit: string) => Promise<void>;
+  // Deletes a branch whose commits the checked-out branch already contains.
+  deleteBranch: (branch: string) => Promise<void>;
+  // Branches, tags, the stash, and the main checkout's HEAD.
+  listGuardedRefs: () => Promise<RefValue[]>;
 };
 
 export function createGitState(execFile: Exec): GitState {
+  function git(args: readonly string[]): Promise<{ stdout: string }> {
+    return execFile("git", [...runnerGitPrefix, ...args]);
+  }
+
   async function hasSafeWorkingTree(): Promise<boolean> {
-    const { stdout } = await execFile("git", ["status", "--porcelain"]);
+    const { stdout } = await git(["status", "--porcelain"]);
     const entries = stdout.split("\n").filter(Boolean);
     const untrackedEntries = entries.filter((entry) => entry.startsWith("??"));
     const trackedEntries = entries.filter((entry) => !entry.startsWith("??"));
@@ -54,56 +62,8 @@ export function createGitState(execFile: Exec): GitState {
     return false;
   }
 
-  async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
-    const rebaseDirectories = await Promise.all(
-      ["rebase-merge", "rebase-apply"].map(async (directory) => {
-        const { stdout } = await execFile("git", [
-          "-C",
-          worktreePath,
-          "rev-parse",
-          "--git-path",
-          directory,
-        ]);
-        return stdout.trim();
-      }),
-    );
-
-    return rebaseDirectories.some((directory) => existsSync(directory));
-  }
-
-  async function abortRebase(worktreePath: string): Promise<boolean> {
-    if (!existsSync(worktreePath)) {
-      return true;
-    }
-
-    if (!(await isRebaseInProgress(worktreePath))) {
-      return true;
-    }
-
-    try {
-      await execFile("git", ["-C", worktreePath, "rebase", "--abort"]);
-      return true;
-    } catch (error) {
-      console.warn(
-        `WARNING: Could not abort the active rebase in ${worktreePath}. Preserving it for manual recovery. ${formatDiagnostic(error)}`,
-      );
-      return false;
-    }
-  }
-
-  async function getCheckedOutBranch(): Promise<string> {
-    const { stdout } = await execFile("git", ["branch", "--show-current"]);
-    const branch = stdout.trim();
-
-    if (!branch) {
-      throw new Error("Git did not return the checked-out branch.");
-    }
-
-    return branch;
-  }
-
   async function getBranchCommit(branch: string): Promise<string> {
-    const { stdout } = await execFile("git", ["rev-parse", "--verify", branch]);
+    const { stdout } = await git(["rev-parse", "--verify", branch]);
     const commit = stdout.trim();
 
     if (!commit) {
@@ -120,7 +80,7 @@ export function createGitState(execFile: Exec): GitState {
     branch: string,
     baseCommit: string,
   ): Promise<boolean> {
-    const { stdout } = await execFile("git", [
+    const { stdout } = await git([
       "rev-list",
       "--count",
       `${baseCommit}..${branch}`,
@@ -140,7 +100,7 @@ export function createGitState(execFile: Exec): GitState {
     beforeCommit: string,
     afterCommit: string,
   ): Promise<string[]> {
-    const { stdout } = await execFile("git", [
+    const { stdout } = await git([
       "diff",
       "--name-only",
       beforeCommit,
@@ -154,7 +114,7 @@ export function createGitState(execFile: Exec): GitState {
   }
 
   async function getBranchHeadCommitSubject(branch: string): Promise<string> {
-    const { stdout } = await execFile("git", [
+    const { stdout } = await git([
       "log",
       "-1",
       "--pretty=%s",
@@ -174,7 +134,7 @@ export function createGitState(execFile: Exec): GitState {
     descendant: string,
   ): Promise<boolean> {
     try {
-      await execFile("git", ["merge-base", "--is-ancestor", ancestor, descendant]);
+      await git(["merge-base", "--is-ancestor", ancestor, descendant]);
       return true;
     } catch (error) {
       if (getErrorCode(error) === 1) {
@@ -185,7 +145,7 @@ export function createGitState(execFile: Exec): GitState {
   }
 
   async function getBaseSnapshot(): Promise<BaseSnapshot> {
-    const { stdout } = await execFile("git", [
+    const { stdout } = await git([
       "status",
       "--porcelain=v2",
       "--branch",
@@ -208,24 +168,50 @@ export function createGitState(execFile: Exec): GitState {
   }
 
   async function fastForwardTo(branch: string): Promise<void> {
-    await execFile("git", ["merge", "--ff-only", branch]);
+    await git(["merge", "--ff-only", branch]);
   }
 
-  async function deleteReviewedBranch(branch: string): Promise<void> {
-    await execFile("git", ["branch", "-d", branch]);
+  async function deleteBranch(branch: string): Promise<void> {
+    await git(["branch", "-d", branch]);
   }
 
-  async function createMergerVerificationWorktree(
-    verificationWorktreePath: string,
-    branch: string,
-  ): Promise<void> {
-    await execFile("git", ["worktree", "add", verificationWorktreePath, branch]);
+  async function createBranch(branch: string, commit: string): Promise<void> {
+    await git(["branch", "--no-track", branch, commit]);
+  }
+
+  async function listGuardedRefs(): Promise<RefValue[]> {
+    const { stdout } = await git([
+      "for-each-ref",
+      "--format=%(refname) %(objectname)",
+      "refs/heads",
+      "refs/tags",
+      "refs/stash",
+    ]);
+    const refs = stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line): RefValue => {
+        const [ref = "", value = ""] = line.split(" ");
+        return { ref, value };
+      });
+
+    let head: string;
+    try {
+      const { stdout: target } = await git(["symbolic-ref", "--quiet", "HEAD"]);
+      head = `ref: ${target.trim()}`;
+    } catch (error) {
+      if (getErrorCode(error) !== 1) {
+        throw error;
+      }
+      const { stdout: commit } = await git(["rev-parse", "--verify", "HEAD"]);
+      head = commit.trim();
+    }
+
+    return [...refs, { ref: "HEAD", value: head }];
   }
 
   return {
     hasSafeWorkingTree,
-    abortRebase,
-    getCheckedOutBranch,
     getBranchCommit,
     hasCommitsBeyondBase,
     getChangedDockerfiles,
@@ -233,7 +219,8 @@ export function createGitState(execFile: Exec): GitState {
     isAncestorCommit,
     getBaseSnapshot,
     fastForwardTo,
-    deleteReviewedBranch,
-    createMergerVerificationWorktree,
+    createBranch,
+    deleteBranch,
+    listGuardedRefs,
   };
 }

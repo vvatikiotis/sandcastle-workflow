@@ -99,19 +99,6 @@ async function removeOverlayAfter<T>(
   return operationResult.value;
 }
 
-/** Runs one sandbox lifecycle with a fresh overlay, then removes the overlay. */
-export async function withNodeModulesOverlay<T>(
-  options: NodeModulesOverlayOptions,
-  operation: (overlay: NodeModulesOverlay) => Promise<T>
-): Promise<T> {
-  const overlay = await createNodeModulesOverlay(options);
-  return removeOverlayAfter(
-    overlay,
-    () => operation(overlay),
-    "Sandbox operation and node_modules overlay cleanup both failed."
-  );
-}
-
 /** Closes a sandbox that mounts the overlay, then removes the overlay. */
 export async function closeSandboxWithNodeModulesOverlay<T>(
   sandbox: { close: () => Promise<T> },

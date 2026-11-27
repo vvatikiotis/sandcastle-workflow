@@ -1,4 +1,4 @@
-// Sequential selection → implementer → reviewer → merger → integration workflow
+// Sequential selection → implementer → reviewer → integration workflow
 //
 // The runner, not an agent, owns the Control Plane decisions (ADR-0001) and
 // every base-branch update. Each issue moves through these steps in order:
@@ -10,23 +10,27 @@
 //   Implementer: works on the issue branch and commits the change.
 //   Reviewer:    reviews the branch diff and either approves it or commits
 //                corrections on the branch.
-//   Merger:      rebases the reviewed branch onto the captured base in a
-//                separate verification worktree, verifies it, and commits any
-//                fix. It never updates the base branch or closes the issue.
-//   Integration: the runner checks that the base did not move and that the
-//                merger's commits change no Dockerfile, then fast-forwards the
-//                base branch with `git merge --ff-only`, closes the issue, and
-//                deletes the reviewed branch.
+//   Integration: the runner rebases the reviewed branch onto the live base
+//                branch in the issue sandbox and runs install, typecheck, and
+//                test there. Only when they pass does it move the issue branch,
+//                fast-forward the base branch with `git merge --ff-only`, close
+//                the issue, and delete the branch. When the base moved first,
+//                it retries up to 3 times.
+//   Reporter:    runs only when the rebase conflicts or verification fails.
+//                It explains why and gives the operator options; it changes
+//                nothing. The runner aborts the rebase, keeps the branch, and
+//                publishes the Integration Report.
 // When every direct child of the selected Specification is closed, the final
 // spec reviewer reviews the integrated result and closes the Specification.
 //
-// The implementer and reviewer share a single sandbox created via
-// createSandbox(), so they work on the same explicit branch. The runner checks
-// each agent phase's commits for Dockerfile changes and aborts the run if any
-// changed.
+// The implementer, reviewer, Integration, and Reporter share a single sandbox
+// created via createSandbox() on the issue branch's own worktree; no agent
+// mounts the main checkout (ADR-0002). The runner checks each agent phase's
+// commits for Dockerfile changes, and every agent phase for changed guarded
+// refs, and aborts the run on either.
 //
-// A normal run holds the active-run lock and first recovers any interrupted
-// merger. The outer loop then repeats up to MAX_ITERATIONS times, integrating
+// A normal run holds the active-run lock. The outer loop repeats up to
+// MAX_ITERATIONS times, integrating
 // at most one issue per iteration and stopping early when no eligible work
 // remains or a phase stops. This keeps the workflow fully sequential.
 //
@@ -73,7 +77,6 @@ import {
 } from "./project-preflight.ts";
 import { createGitState } from "./git-state.ts";
 import { createControlPlane } from "./control-plane.ts";
-import { createMergerRecovery } from "./merger-recovery.ts";
 import { createAgentRuntime } from "./agent-runtime.ts";
 import { requirePrivateDirectory } from "./file-resolution.ts";
 import { runWorkflow } from "./run-loop.ts";
@@ -242,13 +245,17 @@ await requireProjectSandcastleDirectory(projectRoot);
 const execFile = createProjectExec(projectRoot);
 const git = createGitState(execFile);
 const controlPlane = createControlPlane({ execFile, packageVersion });
-const mergerRecovery = createMergerRecovery({ projectRoot, execFile, git });
 
 const packageManager = await resolvePackageManager(projectRoot, packageVersion);
+const verificationCommands = {
+  install: packageManager.commands.install.join(" "),
+  typecheck: packageManager.commands.typecheck.join(" "),
+  test: packageManager.commands.test.join(" "),
+};
 const verificationPromptArgs = {
-  INSTALL_COMMAND: packageManager.commands.install.join(" "),
-  TYPECHECK_COMMAND: packageManager.commands.typecheck.join(" "),
-  TEST_COMMAND: packageManager.commands.test.join(" "),
+  INSTALL_COMMAND: verificationCommands.install,
+  TYPECHECK_COMMAND: verificationCommands.typecheck,
+  TEST_COMMAND: verificationCommands.test,
 };
 
 //
@@ -411,9 +418,9 @@ const runContext: RunContext = {
   agentConfig: AGENT_CONFIG,
   promptFiles,
   verificationPromptArgs,
+  verificationCommands,
   git,
   controlPlane,
-  mergerRecovery,
   runtime,
 };
 

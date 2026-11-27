@@ -11,30 +11,20 @@ import {
   closeSandboxWithNodeModulesOverlay,
   createNodeModulesOverlay,
   removeNodeModulesOverlay,
-  withNodeModulesOverlay,
   type NodeModulesOverlay,
 } from "./node-modules-overlay.ts";
 import { runAgentPhase, type AgentPhaseResult } from "./phase-diagnostics.ts";
 import type { Exec } from "./run-context.ts";
 import type { AgentEnvironment, AgentRoleConfig } from "./runner-config.ts";
 
-// The Implementer and Reviewer share one sandbox on the issue branch.
-export type IssueSandbox = Awaited<ReturnType<typeof sandcastle.createSandbox>>;
+// A Sandcastle sandbox on a named branch in its own worktree. The Implementer,
+// Reviewer, Integration, and Reporter share one on the issue branch; the Final
+// Spec Reviewer gets one on a temporary branch. None mounts the main checkout.
+export type AgentSandbox = Awaited<ReturnType<typeof sandcastle.createSandbox>>;
 
 type SandcastleCodexEffort = NonNullable<
   Parameters<typeof sandcastle.codex>[1]
 >["effort"];
-
-// Where an agent runs: in the shared issue sandbox, or in a fresh sandbox on
-// the checked-out base branch. "dependencies" installs packages first;
-// "auth-only" only copies the Codex credentials in.
-export type AgentSandbox =
-  | { kind: "issue"; sandbox: IssueSandbox }
-  | {
-      kind: "head";
-      nodeModulesPath: string;
-      hooks: "dependencies" | "auth-only";
-    };
 
 export type AgentRun<T extends string> = {
   // Names the run in its start announcement, for example "implementer".
@@ -51,9 +41,9 @@ export type AgentRun<T extends string> = {
   sandbox: AgentSandbox;
 };
 
-export type IssueSandboxResult<T> = {
+export type SandboxResult<T> = {
   value: T;
-  // Set when Sandcastle kept a dirty issue worktree instead of removing it.
+  // Set when Sandcastle kept a dirty worktree instead of removing it.
   preservedWorktreePath: string | undefined;
 };
 
@@ -64,12 +54,13 @@ export type AgentRuntime = {
   createLogPath: (scope: string, agentType: string) => Promise<string>;
   // Announces and runs one agent phase, then parses its phase outcome.
   runAgent: <T extends string>(run: AgentRun<T>) => Promise<AgentPhaseResult<T>>;
-  // Creates the shared issue sandbox, runs the operation in it, and closes it
-  // together with its node_modules overlay even when the operation fails.
-  withIssueSandbox: <T>(
+  // Creates a sandbox on the branch, creating the branch from the checked-out
+  // HEAD when it is missing, runs the operation in it, and closes it together
+  // with its node_modules overlay even when the operation fails.
+  withSandbox: <T>(
     branch: string,
-    operation: (sandbox: IssueSandbox) => Promise<T>,
-  ) => Promise<IssueSandboxResult<T>>;
+    operation: (sandbox: AgentSandbox) => Promise<T>,
+  ) => Promise<SandboxResult<T>>;
 };
 
 export function createAgentRuntime({
@@ -105,12 +96,6 @@ export function createAgentRuntime({
   const dependencyHooks = {
     sandbox: {
       onSandboxReady: [authHook, { command: installCommand.join(" ") }],
-    },
-  };
-
-  const authOnlyHooks = {
-    sandbox: {
-      onSandboxReady: [authHook],
     },
   };
 
@@ -223,47 +208,22 @@ export function createAgentRuntime({
       context: run.context,
       logPath: run.logPath,
       allowedOutcomes: run.allowedOutcomes,
-      run: () => {
-        if (sandbox.kind === "issue") {
-          return sandbox.sandbox.run({
-            name: runName,
-            maxIterations: 1,
-            agent: createConfiguredAgent(run.roleConfig),
-            promptFile: run.promptFile,
-            promptArgs: run.promptArgs,
-            logging,
-          });
-        }
-        return withNodeModulesOverlay(
-          {
-            rootDirectory: nodeModulesOverlayRoot,
-            sandboxPath: sandbox.nodeModulesPath,
-          },
-          (overlay) =>
-            sandcastle.run({
-              name: runName,
-              cwd: projectRoot,
-              maxIterations: 1,
-              agent: createConfiguredAgent(run.roleConfig),
-              sandbox: createDockerSandbox(overlay),
-              hooks:
-                sandbox.hooks === "dependencies"
-                  ? dependencyHooks
-                  : authOnlyHooks,
-              branchStrategy: { type: "head" },
-              promptFile: run.promptFile,
-              promptArgs: run.promptArgs,
-              logging,
-            }),
-        );
-      },
+      run: () =>
+        sandbox.run({
+          name: runName,
+          maxIterations: 1,
+          agent: createConfiguredAgent(run.roleConfig),
+          promptFile: run.promptFile,
+          promptArgs: run.promptArgs,
+          logging,
+        }),
     });
   }
 
-  // Closes the issue sandbox, or only removes its overlay when sandbox creation
+  // Closes the sandbox, or only removes its overlay when sandbox creation
   // failed. A close failure after a failed sandbox operation keeps both errors.
-  async function closeIssueSandbox(
-    sandbox: IssueSandbox | undefined,
+  async function closeSandbox(
+    sandbox: AgentSandbox | undefined,
     overlay: NodeModulesOverlay,
     sandboxOperationError: unknown,
   ): Promise<string | undefined> {
@@ -288,15 +248,15 @@ export function createAgentRuntime({
     }
   }
 
-  async function withIssueSandbox<T>(
+  async function withSandbox<T>(
     branch: string,
-    operation: (sandbox: IssueSandbox) => Promise<T>,
-  ): Promise<IssueSandboxResult<T>> {
+    operation: (sandbox: AgentSandbox) => Promise<T>,
+  ): Promise<SandboxResult<T>> {
     const overlay = await createNodeModulesOverlay({
       rootDirectory: nodeModulesOverlayRoot,
       sandboxPath: "node_modules",
     });
-    let sandbox: IssueSandbox | undefined;
+    let sandbox: AgentSandbox | undefined;
     let value: T;
 
     try {
@@ -308,11 +268,11 @@ export function createAgentRuntime({
       });
       value = await operation(sandbox);
     } catch (error) {
-      await closeIssueSandbox(sandbox, overlay, error);
+      await closeSandbox(sandbox, overlay, error);
       throw error;
     }
 
-    const preservedWorktreePath = await closeIssueSandbox(
+    const preservedWorktreePath = await closeSandbox(
       sandbox,
       overlay,
       undefined,
@@ -325,6 +285,6 @@ export function createAgentRuntime({
     requireDockerImage,
     createLogPath,
     runAgent,
-    withIssueSandbox,
+    withSandbox,
   };
 }

@@ -208,9 +208,9 @@ The underlying executable's help and version options do not require a Git worktr
 | Status | Meaning |
 | --- | --- |
 | `0` | Completed successfully |
-| `1` | Aborted, failed safety preflight, or unexpected failure |
+| `1` | Aborted, failed safety preflight, or unexpected failure, including an agent that changed a guarded ref, a Reporter that changed the repository, and a Final Spec Reviewer commit |
 | `2` | Invalid command or arguments, or a required work-path choice without an interactive terminal |
-| `3` | Stopped safely and requires follow-up |
+| `3` | Stopped safely and requires follow-up, including a failed Integration with its Integration Report |
 | `129`, `130`, `143` | SIGHUP, SIGINT, or SIGTERM |
 
 ## Concurrent runs
@@ -293,16 +293,47 @@ The package includes the optional Agent Skills-standard `github-ticket-relations
 
 Humans and other tools can create the same graph with GitHub CLI or the GitHub web UI: attach each child natively to its parent, add each approved child dependency from the blocked child, and make every child block its parent. Verify the resulting parent, blockers, and blocking edges before running Sandcastle.
 
+## Integration
+
+Each issue runs in one Docker sandbox on its own worktree for branch `sandcastle/issue-<n>`. The Implementer, Reviewer, Integration, and Reporter share it. No agent mounts the Consumer Repository's main checkout.
+
+After the Reviewer approves, the runner integrates the branch itself:
+
+1. In the sandbox, it detaches HEAD and rebases the branch onto the current Base Branch commit, the branch checked out when the issue started.
+2. It runs the install, type check, and test commands on the rebased commit.
+3. Only when all three pass does it move `sandcastle/issue-<n>` to the tested commit.
+4. On the host, it fast-forwards the Base Branch with `git merge --ff-only`, closes the issue, and deletes the branch.
+
+If the Base Branch moved before the fast-forward, the runner rebases and verifies again, up to 3 retries. It then stops with status `3`. Before each retry the branch goes back to the reviewed commit, so after any failure it still points there. The runner's own Git commands run with `core.hooksPath=/dev/null`, so repository hooks do not run for them; agents' commits still run the hooks.
+
+When the rebase conflicts or a check fails, the runner starts the Reporter. The Reporter changes nothing. It writes an Integration Report: the cause, the commits, files, and line numbers involved, and two or three options, each with the exact Git commands to run from the branch and the recorded Base Branch commit. The runner then aborts the rebase, checks the unchanged branch out again, and publishes the Integration Report three ways:
+
+- a `sandcastle-issue-<n>-integration-report-*.log` file under `.sandcastle/logs/`
+- a comment on the issue
+- the terminal
+
+The run then stops with status `3`. The branch still points at the reviewed commit, so no work is lost. If the Reporter commits, changes the worktree, or moves a ref, the run aborts with status `1`.
+
+### Ref guard
+
+Before an issue's sandbox starts, the runner records every branch except the issue branch, every tag, `refs/stash`, and the main checkout's `HEAD`. It checks them again after the Implementer, Reviewer, Reporter, and Final Spec Reviewer. If one changed, the run aborts with status `1` and prints each changed ref, its old and new value, and the `git update-ref` or `git symbolic-ref` command that restores it. Sandcastle restores nothing itself. Remote-tracking refs under `refs/remotes/` are not guarded.
+
+A commit on the Base Branch made by anyone while an agent runs also trips the guard. Avoid committing to the Base Branch during a run.
+
+### Final spec review
+
+The Final Spec Reviewer runs in its own sandbox on the temporary branch `sandcastle/final-spec-<n>`, created at the current Base Branch commit. Afterwards the runner deletes the branch, and Sandcastle removes the clean worktree. If the reviewer commits on the branch, the run aborts with status `1`; the commit never reaches the Base Branch, and the branch is kept for inspection. Delete it with `git branch -D sandcastle/final-spec-<n>` before the next final review, which refuses to start while it exists.
+
 ## Prompts and project guidance
 
 The package always runs its seven packaged prompts. A consumer may add phase-specific guidance by placing one of these fixed filenames directly under `.sandcastle`:
 
 - `implement-prompt.md`
 - `review-prompt.md`
-- `merge-prompt.md`
+- `report-prompt.md`
 - `standalone-implement-prompt.md`
 - `standalone-review-prompt.md`
-- `standalone-merge-prompt.md`
+- `standalone-report-prompt.md`
 - `final-spec-prompt.md`
 
 Each file supplies only additional project instructions for its matching phase. Sandcastle inserts the contents into the packaged prompt before a final mandatory policy and completion block. Project guidance cannot replace the packaged workflow, selected issue scope, safety rules, attribution rules, or completion protocol.
@@ -345,11 +376,11 @@ pnpm sandcastle build-image
 
 An npm consumer uses `npm run sandcastle -- build-image`. Updating the workflow package does not replace an existing `.sandcastle/Dockerfile`; review the packaged default manually and merge relevant changes into the Consumer Repository override when needed.
 
-Implementer, reviewer, and merger agents must not change any file named `Dockerfile` in a Consumer Repository. After the implementer and reviewer phases, Sandcastle compares the branch commits; for the merger, it checks the merger's commits before they reach the base branch. If a phase changed a Dockerfile, Sandcastle writes a prominent `ABORTING RUN` banner and the affected paths to that phase's log, then aborts with an error before starting the next phase or updating the base branch. A maintainer must inspect the branch and make Dockerfile changes outside an agent run.
+Agents must not change any file named `Dockerfile` in a Consumer Repository. After the implementer and reviewer phases, Sandcastle compares the branch commits, and before the fast-forward it checks the whole rebased branch. If a phase changed a Dockerfile, Sandcastle writes a prominent `ABORTING RUN` banner and the affected paths to that phase's log, then aborts with an error before starting the next phase or updating the base branch. A maintainer must inspect the branch and make Dockerfile changes outside an agent run.
 
 ## State and security
 
-Workflow-owned state remains under `.sandcastle`: logs, issue worktrees, dependency overlays, merger recovery state, and the active-run lock. Normal runs enforce owner-only permissions on those directories (`0700`) and on new log, lock, and recovery files (`0600`). These permissions protect against other local users, not agents that receive the project-root mount.
+Workflow-owned state remains under `.sandcastle`: logs, issue worktrees, dependency overlays, and the active-run lock. Normal runs enforce owner-only permissions on those directories (`0700`) and on new log and lock files (`0600`). These permissions protect against other local users, not agents that receive the project-root mount.
 
 Logs and Codex sessions may contain agent messages, commands, source or issue content, local paths, and any credential an agent prints. Sandcastle does not intentionally include `GH_TOKEN` in its diagnostics, but it does not redact arbitrary agent output or dependency errors. Define access, backup, retention, and deletion practices accordingly. Recovery state contains branch names and an absolute host worktree path, not credentials or source content.
 
@@ -368,13 +399,18 @@ Then remove only Sandcastle logs:
 find .sandcastle/logs -type f -name 'sandcastle-*.log' -exec rm -- {} +
 ```
 
-This does not remove worktrees, overlays, locks, recovery markers, configuration, or credentials. Manage `~/.codex/sessions` separately because it is shared with Codex activity outside this workflow.
+This does not remove worktrees, overlays, locks, configuration, or credentials. Manage `~/.codex/sessions` separately because it is shared with Codex activity outside this workflow.
 
 The installed package is read-only, but agent containers receive writable worktrees, network access, and `GH_TOKEN`. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes. Host Git, recovery, and cleanup use absolute host paths; prompts and dependency mounts use `/home/agent/workspace/...` paths.
 
 ## Upgrade
 
-Version `0.7.0` uses `GLOSSARY.md` for project terminology in the packaged prompts. If your repository previously used `CONTEXT.md` for this purpose, rename it to `GLOSSARY.md`; otherwise no consumer migration is required.
+Version `0.7.0` uses `GLOSSARY.md` for project terminology in the packaged prompts. If your repository previously used `CONTEXT.md` for this purpose, rename it to `GLOSSARY.md`.
+
+The merger agent is gone: the runner integrates, and the Reporter explains failed Integrations. Preflight fails until you migrate:
+
+- rename `MERGER_MODEL` and `MERGER_EFFORT` in `.sandcastle/sandcastle.env` to `REPORTER_MODEL` and `REPORTER_EFFORT`;
+- move any guidance in `.sandcastle/merge-prompt.md` or `.sandcastle/standalone-merge-prompt.md` that still applies to `.sandcastle/report-prompt.md` or `.sandcastle/standalone-report-prompt.md`, then delete the old files.
 
 Copy the replacement artifact into `vendor/` and verify its checksum. Set `VERSION` to the new version, install the new file dependency, and then remove the old artifact. Qualify the upgrade before a normal run:
 
