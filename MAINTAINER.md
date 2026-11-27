@@ -107,6 +107,8 @@ pnpm pack --dry-run
 
 The Docker regression builds the ejected packaged Dockerfile, then runs Integration's rebase, verification, re-attach, and conflict restore against a real Sandcastle Docker sandbox. It checks that the rebased branch is reusable and that close removes the clean worktree. It reports a skip when Docker is unavailable. Under rootless Docker it builds and runs the image with UID 0, which rootless Docker maps to the host user.
 
+The runner itself does not support rootless Docker. `build-image` builds the image with the host UID and GID, and Sandcastle starts the container as `--user <host UID>:<host GID>`. Rootless Docker maps that user to an unprivileged subordinate UID, which cannot write the bind-mounted worktree. Rootful Docker on Linux and Docker Desktop on macOS are not rootless and are unaffected.
+
 The packed-artifact suite replaces `@ai-hero/sandcastle` with `test/fake-sandcastle.mjs`. Like the real SDK, the fake creates a Git worktree per sandbox, runs `exec` commands in it, and removes a clean worktree on close; environment variables choose what each simulated agent does. Packed-artifact coverage must verify consumer-visible workflow behavior through the npm and pnpm consumers: Integration success, rebase conflict and failed verification with their Integration Reports, a Reporter that changes the repository, Base Branch retries, the ref guard, the final spec review, and the Dockerfile guard's abort status and phase-log diagnostics.
 
 ### 5. Build the release artifact

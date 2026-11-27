@@ -30,9 +30,10 @@ type ReporterOutcome = "reported";
 
 // The agent phases after which the ref guard runs.
 type GuardedPhase = "implementer" | "reviewer" | "reporter";
-// Integration retries the rebase and verification this many times when the
-// Base Branch moves before the fast-forward.
-const integrationRetries = 3;
+
+// How many times Integration rebases and verifies in total when the Base
+// Branch keeps moving before the fast-forward.
+const integrationAttempts = 3;
 
 // What differs between the two Work Paths. Every step and message of the
 // issue workflow is otherwise shared.
@@ -512,10 +513,9 @@ async function integrate(
     "integration",
   );
   const log: IntegrationLog = (text) => appendFile(logPath, text);
-  const attempts = 1 + integrationRetries;
   const reviewedCommit = await git.getBranchCommit(branch);
 
-  for (let attempt = 1; attempt <= attempts; attempt++) {
+  for (let attempt = 1; attempt <= integrationAttempts; attempt++) {
     const onto = await git.getBranchCommit(base.branch);
     console.log(`Integration: rebasing ${branch} onto ${base.branch} at ${onto}.`);
     const outcome = await rebaseAndVerify(sandbox, {
@@ -571,14 +571,14 @@ async function integrate(
       to: reviewedCommit,
       log,
     });
-    if (attempt < attempts) {
+    if (attempt < integrationAttempts) {
       console.warn(
-        `WARNING: ${base.branch} moved during Integration of ${issueLabel}; rebasing and verifying again (retry ${attempt} of ${integrationRetries}).`,
+        `WARNING: ${base.branch} moved during Integration of ${issueLabel}; rebasing and verifying again (attempt ${attempt + 1} of ${integrationAttempts}).`,
       );
     }
   }
 
-  const reason = `${base.branch} moved before every fast-forward of ${branch}; Integration of ${issueLabel} gave up after ${integrationRetries} retries. ${branch} is unchanged at the reviewed commit ${reviewedCommit}. Log: ${logPath}`;
+  const reason = `${base.branch} moved before every fast-forward of ${branch}; Integration of ${issueLabel} gave up after ${integrationAttempts} attempts. ${branch} is unchanged at the reviewed commit ${reviewedCommit}. Log: ${logPath}`;
   console.warn(`WARNING: ${reason}`);
   return { outcome: "stopped", reason };
 }
