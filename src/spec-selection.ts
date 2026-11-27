@@ -1,4 +1,4 @@
-export type IssueStatus =
+type IssueStatus =
   | "closed"
   | "ready-for-agent"
   | "needs-info"
@@ -194,17 +194,26 @@ export function selectRunSpec(
     : candidates[0];
 }
 
+// Blockers of `child` that are not closed siblings; a blocker missing from
+// `children` counts as open.
+export function getOpenBlockerIds(
+  child: SpecChild,
+  children: readonly SpecChild[]
+): string[] {
+  return child.blockerIds.filter(
+    (blockerId) =>
+      children.find((candidate) => candidate.id === blockerId)?.status !==
+      "closed"
+  );
+}
+
 export function getEligibleChildren(
   children: readonly SpecChild[]
 ): SpecChild[] {
-  const childrenById = new Map(children.map((child) => [child.id, child]));
-
   return children.filter(
     (child) =>
       child.status === "ready-for-agent" &&
-      child.blockerIds.every(
-        (blockerId) => childrenById.get(blockerId)?.status === "closed"
-      )
+      getOpenBlockerIds(child, children).length === 0
   );
 }
 

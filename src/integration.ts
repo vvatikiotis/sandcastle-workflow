@@ -2,7 +2,7 @@ import { runnerGitPrefix } from "./git-state.ts";
 
 // Integration runs its commands inside the issue sandbox, which mounts the
 // issue worktree and the repository's Git directory, never the main checkout.
-export type SandboxExec = {
+type SandboxExec = {
   exec: (
     command: string,
   ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
@@ -18,7 +18,7 @@ export type VerificationCommands = {
 // HEAD is attached to it again. Otherwise the issue branch is unchanged: a
 // conflict leaves the rebase in progress and a failed verification leaves HEAD
 // detached at the rebased commit, so the Reporter can inspect either.
-export type RebaseOutcome =
+type RebaseOutcome =
   | { kind: "verified"; commit: string }
   | { kind: "conflict"; detail: string }
   | { kind: "verification-failed"; detail: string };

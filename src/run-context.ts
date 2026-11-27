@@ -8,7 +8,7 @@ import type { VerificationCommands } from "./integration.ts";
 import type { PromptFiles } from "./prompt-resolution.ts";
 import type { AgentConfig } from "./runner-config.ts";
 
-export type ExecResult = { stdout: string; stderr: string };
+type ExecResult = { stdout: string; stderr: string };
 
 // Runs a command in the Consumer Repository root and resolves with its output.
 export type Exec = (file: string, args: readonly string[]) => Promise<ExecResult>;

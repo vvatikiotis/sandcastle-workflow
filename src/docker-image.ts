@@ -1,14 +1,13 @@
 import { defaultImageName } from "@ai-hero/sandcastle/sandboxes/docker";
-import { lstat } from "node:fs/promises";
 import path from "node:path";
 
-import { getErrorCode } from "./error-code.ts";
 import {
+  entryExists,
   isWithinDirectory,
   requireReadableRegularFile,
 } from "./file-resolution.ts";
 
-export type DockerfileSelection = {
+type DockerfileSelection = {
   path: string;
   context: string;
   source: "packaged" | "project override";
@@ -41,15 +40,7 @@ export async function resolveDockerfile(options: {
   const { projectRoot, workflowRoot } = options;
   const overridePath = path.join(projectRoot, ".sandcastle", "Dockerfile");
 
-  try {
-    await lstat(overridePath);
-  } catch (error) {
-    if (getErrorCode(error) !== "ENOENT") {
-      throw new Error("Could not inspect project override.", {
-        cause: error,
-      });
-    }
-
+  if (!(await entryExists(overridePath, "project override"))) {
     const packagedPath = await requireReadableRegularFile(
       path.join(workflowRoot, "defaults", "docker", "Dockerfile"),
       "Packaged Dockerfile"

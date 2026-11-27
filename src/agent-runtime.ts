@@ -26,7 +26,7 @@ type SandcastleCodexEffort = NonNullable<
   Parameters<typeof sandcastle.codex>[1]
 >["effort"];
 
-export type AgentRun<T extends string> = {
+type AgentRun<T extends string> = {
   // Names the run in its start announcement, for example "implementer".
   agentType: string;
   roleConfig: AgentRoleConfig;
@@ -41,7 +41,7 @@ export type AgentRun<T extends string> = {
   sandbox: AgentSandbox;
 };
 
-export type SandboxResult<T> = {
+type SandboxResult<T> = {
   value: T;
   // Set when Sandcastle kept a dirty worktree instead of removing it.
   preservedWorktreePath: string | undefined;

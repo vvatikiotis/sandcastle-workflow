@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { appendFile, writeFile } from "node:fs/promises";
 
 import type { AgentSandbox } from "./agent-runtime.ts";
-import type { BaseSnapshot } from "./git-state.ts";
+import { unsafeBaseCheckoutReason, type BaseSnapshot } from "./git-state.ts";
 import {
   fingerprintWorktree,
   rebaseAndVerify,
@@ -37,7 +37,7 @@ const integrationAttempts = 3;
 
 // What differs between the two Work Paths. Every step and message of the
 // issue workflow is otherwise shared.
-export type WorkPathProfile = {
+type WorkPathProfile = {
   // Names the issue in messages: "child issue" or "standalone issue".
   issueNoun: string;
   prompts: {
@@ -86,7 +86,7 @@ export function createStandalonePathProfile({
 }
 
 // "aborted" means a safety check failed and the run must exit with status 1.
-export type IssueRunResult =
+type IssueRunResult =
   | { outcome: "integrated" }
   | { outcome: "stopped" | "aborted"; reason: string };
 
@@ -552,7 +552,7 @@ async function integrate(
       logPath,
     );
     if (!(await git.hasSafeWorkingTree())) {
-      return abort("The base checkout has tracked working-tree changes.");
+      return abort(unsafeBaseCheckoutReason);
     }
 
     if ((await git.getBranchCommit(base.branch)) === onto) {

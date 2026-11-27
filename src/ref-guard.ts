@@ -2,7 +2,7 @@ import type { GitState, RefValue } from "./git-state.ts";
 
 // A guarded ref whose value differs from the snapshot. `before` or `after`
 // is undefined when the ref was created or deleted.
-export type RefChange = {
+type RefChange = {
   ref: string;
   before: string | undefined;
   after: string | undefined;

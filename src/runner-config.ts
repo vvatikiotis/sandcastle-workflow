@@ -52,7 +52,7 @@ const runnerConfigSchema = z.object({
   Record<RunnerConfigKey, string> &
     Partial<Record<OptionalRunnerConfigKey, string>>
 >;
-export type RunnerConfig = z.infer<typeof runnerConfigSchema>;
+type RunnerConfig = z.infer<typeof runnerConfigSchema>;
 
 function isRunnerConfigEntryKey(
   key: string,

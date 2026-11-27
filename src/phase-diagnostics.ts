@@ -1,6 +1,6 @@
 import { formatDiagnostic } from "./run-completion.ts";
 
-export type PhaseFailure = {
+type PhaseFailure = {
   phase: string;
   outcome: string;
   detail?: string;

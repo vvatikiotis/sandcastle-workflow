@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { getErrorCode } from "./error-code.ts";
 
-export type SupportedPackageManager = {
+type SupportedPackageManager = {
   name: "npm" | "pnpm";
   major: 10 | 11;
   commands: {

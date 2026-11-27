@@ -22,7 +22,7 @@ export type WorkCandidates = {
   errors: string[];
 };
 
-export type StandaloneEligibilityError = {
+type StandaloneEligibilityError = {
   kind: "state-changed" | "invalid-graph";
   detail: string;
 };

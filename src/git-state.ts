@@ -13,6 +13,9 @@ export const runnerGitPrefix = ["-c", "core.hooksPath=/dev/null"] as const;
 // symbolic target ("ref: refs/heads/main") or commit for HEAD.
 export type RefValue = { ref: string; value: string };
 
+export const unsafeBaseCheckoutReason =
+  "The base checkout has tracked working-tree changes.";
+
 export type GitState = {
   // Warns about untracked files; false when tracked changes are present.
   hasSafeWorkingTree: () => Promise<boolean>;
