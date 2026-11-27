@@ -304,7 +304,7 @@ After the Reviewer approves, the runner integrates the branch itself:
 3. Only when all three pass does it move `sandcastle/issue-<n>` to the tested commit.
 4. On the host, it fast-forwards the Base Branch with `git merge --ff-only`, closes the issue, and deletes the branch.
 
-If the Base Branch moved before the fast-forward, the runner rebases and verifies again, up to 3 retries. It then stops with status `3`. Before each retry the branch goes back to the reviewed commit, so after any failure it still points there. The runner's own Git commands run with `core.hooksPath=/dev/null`, so repository hooks do not run for them; agents' commits still run the hooks.
+If the Base Branch moved before the fast-forward, the runner rebases and verifies again, for at most 3 attempts in total. It then stops with status `3`. Before each new attempt the branch goes back to the reviewed commit, so after any failure it still points there. The runner's own Git commands run with `core.hooksPath=/dev/null`, so repository hooks do not run for them; agents' commits still run the hooks.
 
 When the rebase conflicts or a check fails, the runner starts the Reporter. The Reporter changes nothing. It writes an Integration Report: the cause, the commits, files, and line numbers involved, and two or three options, each with the exact Git commands to run from the branch and the recorded Base Branch commit. The runner then aborts the rebase, checks the unchanged branch out again, and publishes the Integration Report three ways:
 

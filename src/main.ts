@@ -15,7 +15,7 @@
 //                test there. Only when they pass does it move the issue branch,
 //                fast-forward the base branch with `git merge --ff-only`, close
 //                the issue, and delete the branch. When the base moved first,
-//                it retries up to 3 times.
+//                it tries again, for at most 3 attempts in total.
 //   Reporter:    runs only when the rebase conflicts or verification fails.
 //                It explains why and gives the operator options; it changes
 //                nothing. The runner aborts the rebase, keeps the branch, and

@@ -2511,7 +2511,7 @@ fi
       });
 
       assert.match(result.stdout, /Integration complete for standalone issue #42/);
-      assert.match(result.stderr, /main moved during Integration.*retry 1 of 3/);
+      assert.match(result.stderr, /main moved during Integration.*attempt 2 of 3/);
       const tests = (await readExecs(capturePath)).filter((command) => command === "pnpm test");
       assert.equal(tests.length, 2);
       const { stdout: log } = await run("git", ["log", "--format=%s", "main"], { cwd: consumerRoot });
@@ -2541,7 +2541,7 @@ fi
       assert.ok(reportLog.contents.includes(`unchanged at \`${branchCommit}\``));
     });
 
-    it("leaves the reviewed commit on the branch after the retries run out", async () => {
+    it("leaves the reviewed commit on the branch after the attempts run out", async () => {
       const { consumerRoot, shim, environment, git, branchCommit } =
         await prepareBranchBehindBase("pnpm-retry-exhausted-branch");
 
@@ -2555,7 +2555,7 @@ fi
     });
 
     for (const manager of ["npm-base-keeps-moving", "pnpm-base-keeps-moving"]) {
-      it(`stops with status 3 after three retries when the base keeps moving in a ${manager.split("-")[0]} consumer`, async () => {
+      it(`stops with status 3 after three verified rebases when the base keeps moving in a ${manager.split("-")[0]} consumer`, async () => {
         const { consumerRoot, shim, environment, capturePath, fixturePath } =
           await prepareWorkflowConsumer(manager, {
             readyIssueLists: [[standaloneIssue("42")]],
@@ -2567,11 +2567,11 @@ fi
         });
 
         assert.equal(error.code, 3, error.stdout);
-        assert.match(error.stderr, /gave up after 3 retries/);
+        assert.match(error.stderr, /gave up after 3 attempts/);
         const tests = (await readExecs(capturePath)).filter((command) =>
           /^(npm|pnpm) test$/.test(command)
         );
-        assert.equal(tests.length, 4);
+        assert.equal(tests.length, 3);
         assert.deepEqual(await readCapturedPhases(capturePath), ["implementer", "reviewer"]);
         assert.deepEqual(await readClosedIssues(fixturePath), []);
       });
