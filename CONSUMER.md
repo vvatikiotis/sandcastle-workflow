@@ -224,7 +224,7 @@ LOCK_PID=$(node -p "JSON.parse(require('fs').readFileSync('.sandcastle/run.lock'
 ps -p "$LOCK_PID" -o pid=,lstart=,command=
 ```
 
-A listed process still owns the lock; leave it in place. If `ps` reports that the PID does not exist, the lock is stale. For any other parsing or lookup error, leave the lock in place and investigate. Before removing a stale lock, inspect `.sandcastle/merger-recovery.json`, `.sandcastle/worktrees`, and the latest log, preserving any recovery state for the next run. Remove only `.sandcastle/run.lock`.
+A listed process still owns the lock; leave it in place. If `ps` reports that the PID does not exist, the lock is stale. For any other parsing or lookup error, leave the lock in place and investigate. Before removing a stale lock, inspect `.sandcastle/worktrees` and the latest log. Remove only `.sandcastle/run.lock`.
 
 `--dry-run`, `--help`, `--version`, initialization, and image building do not use the lock. Repositories have independent locks. New initialization adds `run.lock` to `.sandcastle/.gitignore`.
 
@@ -243,7 +243,7 @@ cp .sandcastle/sandcastle.env.example .sandcastle/sandcastle.env
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
-The runner configuration selects models, effort, maximum iterations, and an optional Docker image. The agent environment supports only `GH_TOKEN`; an empty declaration uses a non-empty host value. Any other key stops normal-run preflight. Initialization does not create active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, overlays, or recovery state.
+The runner configuration selects models, effort, maximum iterations, and an optional Docker image. The agent environment supports only `GH_TOKEN`; an empty declaration uses a non-empty host value. Any other key stops normal-run preflight. Initialization does not create active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, or overlays.
 
 ## Consumer contract
 
@@ -382,7 +382,7 @@ Agents must not change any file named `Dockerfile` in a Consumer Repository. Aft
 
 Workflow-owned state remains under `.sandcastle`: logs, issue worktrees, dependency overlays, and the active-run lock. Normal runs enforce owner-only permissions on those directories (`0700`) and on new log and lock files (`0600`). These permissions protect against other local users, not agents that receive the project-root mount.
 
-Logs and Codex sessions may contain agent messages, commands, source or issue content, local paths, and any credential an agent prints. Sandcastle does not intentionally include `GH_TOKEN` in its diagnostics, but it does not redact arbitrary agent output or dependency errors. Define access, backup, retention, and deletion practices accordingly. Recovery state contains branch names and an absolute host worktree path, not credentials or source content.
+Logs and Codex sessions may contain agent messages, commands, source or issue content, local paths, and any credential an agent prints. Sandcastle does not intentionally include `GH_TOKEN` in its diagnostics, but it does not redact arbitrary agent output or dependency errors. Define access, backup, retention, and deletion practices accordingly.
 
 ### Log retention and cleanup
 
@@ -406,11 +406,6 @@ The installed package is read-only, but agent containers receive writable worktr
 ## Upgrade
 
 Version `0.7.0` uses `GLOSSARY.md` for project terminology in the packaged prompts. If your repository previously used `CONTEXT.md` for this purpose, rename it to `GLOSSARY.md`.
-
-The merger agent is gone: the runner integrates, and the Reporter explains failed Integrations. Preflight fails until you migrate:
-
-- rename `MERGER_MODEL` and `MERGER_EFFORT` in `.sandcastle/sandcastle.env` to `REPORTER_MODEL` and `REPORTER_EFFORT`;
-- move any guidance in `.sandcastle/merge-prompt.md` or `.sandcastle/standalone-merge-prompt.md` that still applies to `.sandcastle/report-prompt.md` or `.sandcastle/standalone-report-prompt.md`, then delete the old files.
 
 Copy the replacement artifact into `vendor/` and verify its checksum. Set `VERSION` to the new version, install the new file dependency, and then remove the old artifact. Qualify the upgrade before a normal run:
 

@@ -31,11 +31,6 @@ const runnerConfigKeys = [
   "MAX_ITERATIONS",
 ] as const;
 const optionalRunnerConfigKeys = ["DOCKER_IMAGE"] as const;
-// Keys an earlier version used, and the key that replaced each.
-const replacedRunnerConfigKeys: Readonly<Record<string, string>> = {
-  MERGER_MODEL: "REPORTER_MODEL",
-  MERGER_EFFORT: "REPORTER_EFFORT",
-};
 
 type RunnerConfigKey = (typeof runnerConfigKeys)[number];
 type OptionalRunnerConfigKey = (typeof optionalRunnerConfigKeys)[number];
@@ -133,12 +128,6 @@ export async function loadRunnerConfig(
     }
 
     const key = trimmedLine.slice(0, separatorIndex).trim();
-    const replacement = replacedRunnerConfigKeys[key];
-    if (replacement !== undefined) {
-      throw new Error(
-        `${runnerConfigPath}:${lineNumber}: ${key} was replaced by ${replacement}. Rename the key to ${replacement}; it configures the Reporter, which explains failed Integrations.`,
-      );
-    }
     if (!isRunnerConfigEntryKey(key)) {
       throw new Error(
         `${runnerConfigPath}:${lineNumber}: unknown configuration key ${key}.`,

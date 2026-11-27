@@ -1690,14 +1690,6 @@ fi
           contents: validConfig.replace("REPORTER_MODEL=test-model\n", ""),
           diagnostic: /missing required configuration: REPORTER_MODEL/,
         },
-        {
-          contents: validConfig.replace("REPORTER_MODEL=", "MERGER_MODEL="),
-          diagnostic: /MERGER_MODEL was replaced by REPORTER_MODEL/,
-        },
-        {
-          contents: validConfig.replace("REPORTER_EFFORT=", "MERGER_EFFORT="),
-          diagnostic: /MERGER_EFFORT was replaced by REPORTER_EFFORT/,
-        },
       ];
 
       for (const { contents, diagnostic } of cases) {
@@ -1718,37 +1710,6 @@ fi
       });
       assert.equal(missing.code, 1);
       assert.match(missing.stderr, /sandcastle\.env is required/);
-    });
-
-    it("rejects project guidance for the replaced merge prompts", async () => {
-      const { consumerRoot, shim, binRoot } = await prepareDryRunConsumer(
-        "pnpm-replaced-guidance"
-      );
-      const environment = {
-        ...process.env,
-        PATH: `${binRoot}:${process.env.PATH ?? ""}`,
-      };
-
-      for (const [oldFilename, newFilename] of [
-        ["merge-prompt.md", "report-prompt.md"],
-        ["standalone-merge-prompt.md", "standalone-report-prompt.md"],
-      ]) {
-        const oldPath = path.join(consumerRoot, ".sandcastle", oldFilename);
-        await writeFile(oldPath, "Old merger guidance.\n");
-        const error = await runExpectingFailure(shim, ["--dry-run"], {
-          cwd: consumerRoot,
-          env: environment,
-        });
-        assert.equal(error.code, 1);
-        assert.ok(
-          error.stderr.includes(
-            `.sandcastle/${oldFilename} was replaced by .sandcastle/${newFilename}`
-          ),
-          error.stderr
-        );
-        assert.doesNotMatch(error.stdout, /=== Sandcastle dry run ===/);
-        await rm(oldPath);
-      }
     });
 
     it("requires usable agent credentials only for runs that launch agents and never prints them", async () => {

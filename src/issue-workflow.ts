@@ -12,7 +12,7 @@ import {
 } from "./integration.ts";
 import { reportPhaseFailure } from "./phase-diagnostics.ts";
 import type { PromptFilename } from "./prompt-resolution.ts";
-import { isReviewerCommitMessageForIssue } from "./recovery-routing.ts";
+import { isReviewerCommitMessageForIssue } from "./reviewer-commit.ts";
 import {
   formatRefChanges,
   snapshotGuardedRefs,
@@ -123,8 +123,11 @@ function promptArgsFor(
   promptFile: PromptFilename,
   args: Record<string, string>,
 ): Record<string, string> {
+  const { verificationCommands } = run.context;
   return {
-    ...run.context.verificationPromptArgs,
+    INSTALL_COMMAND: verificationCommands.install,
+    TYPECHECK_COMMAND: verificationCommands.typecheck,
+    TEST_COMMAND: verificationCommands.test,
     ...args,
     ISSUE_ID: run.issueId,
     PROJECT_GUIDANCE: run.context.promptFiles.getGuidance(promptFile),

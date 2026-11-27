@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { isReviewerCommitMessageForIssue } from "../src/recovery-routing.ts";
+import { isReviewerCommitMessageForIssue } from "../src/reviewer-commit.ts";
 
 describe("Reviewer commit classification", () => {
   it("matches exact Sandcastle reviewer commit format for the same issue", () => {

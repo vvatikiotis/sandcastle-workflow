@@ -252,11 +252,6 @@ const verificationCommands = {
   typecheck: packageManager.commands.typecheck.join(" "),
   test: packageManager.commands.test.join(" "),
 };
-const verificationPromptArgs = {
-  INSTALL_COMMAND: verificationCommands.install,
-  TYPECHECK_COMMAND: verificationCommands.typecheck,
-  TEST_COMMAND: verificationCommands.test,
-};
 
 //
 // endregion CLI and project bootstrap
@@ -417,7 +412,6 @@ const runContext: RunContext = {
   projectRoot,
   agentConfig: AGENT_CONFIG,
   promptFiles,
-  verificationPromptArgs,
   verificationCommands,
   git,
   controlPlane,
