@@ -7,7 +7,8 @@
 # Required runtime capabilities for a custom override:
 # - Node.js 22 or newer and the Consumer Repository's supported package manager
 #   (npm 10 or pnpm 11). The default image provides Node.js and npm, then enables pnpm.
-# - The `codex` executable, which the default image installs with npm.
+# - The `codex` and `claude` executables, which the default image installs with npm.
+#   An image used only by roles of one agent needs only that agent's executable.
 # - Git, GitHub CLI (`gh`), and a POSIX shell for workflow and agent commands.
 # - A non-root `agent` user whose UID/GID can be aligned with the build arguments,
 #   `/home/agent/workspace` as the mounted project path, and a long-running entrypoint.
@@ -49,9 +50,10 @@ ARG AGENT_GID=1000
 # Rename the base image's "node" user to "agent" and align UID/GID.
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
-# Install Codex CLI (run as root before USER agent). A custom image may install a
-# pinned or otherwise different release, but `codex` must remain available to agents.
-RUN npm install -g @openai/codex@latest
+# Install the Codex and Claude Code CLIs (run as root before USER agent). A custom
+# image may install pinned or otherwise different releases, but `codex` and `claude`
+# must remain available to the agents the runner configuration uses.
+RUN npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest
 
 # Provide pnpm for pnpm Consumer Repositories. npm-based consumers use the npm
 # supplied by Node.js; a custom image must provide the package manager it supports.

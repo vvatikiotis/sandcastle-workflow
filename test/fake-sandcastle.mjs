@@ -82,7 +82,11 @@ function increment(name) {
 }
 
 export function codex(model, options) {
-  return { model, options };
+  return { provider: "codex", model, options };
+}
+
+export function claudeCode(model, options) {
+  return { provider: "claude-code", model, options };
 }
 
 export async function createSandbox(options) {
@@ -99,7 +103,13 @@ export async function createSandbox(options) {
     options.branch.replaceAll("/", "-"),
   );
   sandcastleGit(repository, ["worktree", "add", "--quiet", worktreePath, options.branch]);
-  capture({ type: "sandbox", branch: options.branch, hooks: options.hooks });
+  capture({
+    type: "sandbox",
+    branch: options.branch,
+    hooks: options.hooks,
+    env: options.sandbox.env,
+    mounts: options.sandbox.mounts,
+  });
 
   async function runAgent(runOptions) {
     const role = roleOf(runOptions.name);
@@ -111,7 +121,14 @@ export async function createSandbox(options) {
       promptFile: runOptions.promptFile,
       logMode: statSync(runOptions.logging.path).mode & 0o777,
       verbose: runOptions.logging.verbose,
+      agent: runOptions.agent,
     });
+
+    // Like Sandcastle when the agent command fails, for example because the
+    // CLI is missing from the image or its login expired.
+    if (settingFor("FAKE_AGENT_START_FAILURE", role) !== undefined) {
+      throw new Error(`${runOptions.agent.provider} exited with code 127:\nsh: 1: ${settingFor("FAKE_AGENT_START_FAILURE", role)}: not found`);
+    }
 
     const changedFile = settingFor("FAKE_AGENT_FILE_CHANGE", role);
     if (changedFile) {

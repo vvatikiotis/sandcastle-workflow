@@ -68,12 +68,14 @@ These steps install version `0.7.0` in a new pnpm consumer.
 
 7. **Configure runner settings and credentials**
 
-   Edit these files and set the required values, including `GH_TOKEN`:
+   Edit these files and set the required values, including the agent each role runs and `GH_TOKEN`:
 
    ```text
    .sandcastle/sandcastle.env
    .sandcastle/.env
    ```
+
+   Log in to each agent you choose on the host before a normal run, as described in [Agents and logins](#agents-and-logins).
 
    `GH_TOKEN` must contain a GitHub personal access token (PAT) with access to the Consumer Repository and these repository permissions:
 
@@ -166,7 +168,7 @@ Version `0.7.0` supports:
 - GitHub.com Issues and native issue relationships
 - a current GitHub CLI release that exposes native sub-issue and dependency relationship fields
 - Docker sandboxes
-- Codex runtime agents
+- Codex and Claude Code runtime agents, chosen per role
 
 The package is private and local-only. Consumers commit a reviewed tarball under `vendor/` and install it as a development dependency. Collaborators with access to the consumer repository receive that artifact.
 
@@ -208,7 +210,7 @@ The underlying executable's help and version options do not require a Git worktr
 | Status | Meaning |
 | --- | --- |
 | `0` | Completed successfully |
-| `1` | Aborted, failed safety preflight, or unexpected failure, including an agent that changed a guarded ref, a Reporter that changed the repository, and a Final Spec Reviewer commit |
+| `1` | Aborted, failed safety preflight, or unexpected failure, including a missing agent login, an agent that cannot start, an agent that changed a guarded ref, a Reporter that changed the repository, and a Final Spec Reviewer commit |
 | `2` | Invalid command or arguments, or a required work-path choice without an interactive terminal |
 | `3` | Stopped safely and requires follow-up, including a failed Integration with its Integration Report |
 | `129`, `130`, `143` | SIGHUP, SIGINT, or SIGTERM |
@@ -243,7 +245,30 @@ cp .sandcastle/sandcastle.env.example .sandcastle/sandcastle.env
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
-The runner configuration selects models, effort, maximum iterations, and an optional Docker image. The agent environment supports only `GH_TOKEN`; an empty declaration uses a non-empty host value. Any other key stops normal-run preflight. Initialization does not create active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, or overlays.
+The runner configuration selects the agent, model, and effort for each role, the maximum iterations, and an optional Docker image. Each example key has a comment with its allowed values and an example value. The agent environment supports `GH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`; an empty value uses a non-empty host value. Any other key stops normal-run preflight. Initialization does not create active configuration, prompts, Dockerfiles, package scripts, logs, worktrees, or overlays.
+
+## Agents and logins
+
+Each role runs Codex or Claude Code. Set every key in `.sandcastle/sandcastle.env`:
+
+| Role | Agent | Model | Effort |
+| --- | --- | --- | --- |
+| Implementer | `IMPLEMENTER_AGENT` | `IMPLEMENTER_MODEL` | `IMPLEMENTER_EFFORT` |
+| Reviewer | `REVIEWER_AGENT` | `REVIEWER_MODEL` | `REVIEWER_EFFORT` |
+| Reporter | `REPORTER_AGENT` | `REPORTER_MODEL` | `REPORTER_EFFORT` |
+| Final Spec Reviewer | `FINAL_SPEC_REVIEWER_AGENT` | `FINAL_SPEC_REVIEWER_MODEL` | `FINAL_SPEC_REVIEWER_EFFORT` |
+
+An agent key is `codex` or `claude-code`. It has no default: a missing or empty key fails preflight, and any other value fails preflight with the file and line. For a `claude-code` role, effort must be `low`, `medium`, `high`, `xhigh`, or `max`. Codex effort is passed to Codex unchecked. Roles may mix agents; the Implementer, Reviewer, and Reporter then share one sandbox that holds both logins.
+
+Before any sandbox starts, a normal run checks a login for every agent the configuration uses. A missing login exits with status `1` and names the roles, the agent, and how to log in. `--dry-run` checks no logins. An agent no role uses gets no check, mount, or copy.
+
+- **Codex:** run `codex login` on the host. `~/.codex/auth.json` must be a readable file. The runner mounts `~/.codex` read-only and copies `auth.json`, and `config.toml` when present, into the sandbox.
+- **Claude Code with a token:** run `claude setup-token` and set `CLAUDE_CODE_OAUTH_TOKEN` in `.sandcastle/.env`, or leave it empty and set it in the host environment. The token takes precedence: the runner forwards it to the sandbox and does not mount `~/.claude`.
+- **Claude Code with `~/.claude`:** without a token, `~/.claude/.credentials.json` must be a readable file, which logging in with `claude` creates on Linux. The runner mounts `~/.claude` read-only and copies `.credentials.json` into the sandbox.
+
+On macOS, Claude Code keeps its login in the Keychain rather than in `~/.claude/.credentials.json`, so use the token there.
+
+If an agent still cannot start in the sandbox, for example because its command is missing from the Docker image or its login expired, the run exits with status `1`. The message names the role, the agent, and how to log in again.
 
 ## Consumer contract
 
@@ -350,7 +375,7 @@ Without `DOCKER_IMAGE`, the package derives `sandcastle:<project>-v<package-vers
 
 The packaged Dockerfile uses its own minimal build context. A contained `.sandcastle/Dockerfile` override takes precedence and uses the Git root as context.
 
-The default Dockerfile installs `@openai/codex@latest`. Rebuilds can install a different release, while Docker caching can retain an older one. The package version therefore does not identify the installed Codex version. Sandcastle does not disable Docker cache, attest image contents, or pin Codex automatically.
+The default Dockerfile installs `@openai/codex@latest` and `@anthropic-ai/claude-code@latest`. Rebuilds can install a different release, while Docker caching can retain an older one. The package version therefore does not identify the installed Codex or Claude Code version. Sandcastle does not disable Docker cache, attest image contents, or pin either agent automatically.
 
 ### Eject and customize the Dockerfile
 
@@ -368,7 +393,7 @@ npm run sandcastle -- eject-dockerfile
 
 Run the command from the Git root or any nested directory. It creates `.sandcastle/Dockerfile` only when that file is absent and never overwrites an existing override. The copied file includes comments describing the required runtime capabilities and customization boundaries.
 
-The project Dockerfile is a complete replacement, not an extension of the packaged Dockerfile. You may change the base image, installed operating-system packages, tool versions, or add other runtimes. Preserve Node.js 22 or newer, the Consumer Repository's package manager (npm 10 or pnpm 11), the `codex`, `git`, and `gh` commands, agent access to `/home/agent/workspace`, UID/GID build arguments, and a long-running container entrypoint. Rebuild the image after every change:
+The project Dockerfile is a complete replacement, not an extension of the packaged Dockerfile. You may change the base image, installed operating-system packages, tool versions, or add other runtimes. Preserve Node.js 22 or newer, the Consumer Repository's package manager (npm 10 or pnpm 11), the `git` and `gh` commands, the `codex` command when a role runs Codex and the `claude` command when a role runs Claude Code, agent access to `/home/agent/workspace`, UID/GID build arguments, and a long-running container entrypoint. Rebuild the image after every change:
 
 ```bash
 pnpm sandcastle build-image
@@ -382,7 +407,7 @@ Agents must not change any file named `Dockerfile` in a Consumer Repository. Aft
 
 Workflow-owned state remains under `.sandcastle`: logs, issue worktrees, dependency overlays, and the active-run lock. Normal runs enforce owner-only permissions on those directories (`0700`) and on new log and lock files (`0600`). These permissions protect against other local users, not agents that receive the project-root mount.
 
-Logs and Codex sessions may contain agent messages, commands, source or issue content, local paths, and any credential an agent prints. Sandcastle does not intentionally include `GH_TOKEN` in its diagnostics, but it does not redact arbitrary agent output or dependency errors. Define access, backup, retention, and deletion practices accordingly.
+Logs and agent sessions may contain agent messages, commands, source or issue content, local paths, and any credential an agent prints. Sandcastle copies each agent's session back to the host: Codex sessions under `~/.codex/sessions` and Claude Code sessions under `~/.claude/projects`. Sandcastle does not intentionally include `GH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in its diagnostics, but it does not redact arbitrary agent output or dependency errors. Define access, backup, retention, and deletion practices accordingly.
 
 ### Log retention and cleanup
 
@@ -399,9 +424,9 @@ Then remove only Sandcastle logs:
 find .sandcastle/logs -type f -name 'sandcastle-*.log' -exec rm -- {} +
 ```
 
-This does not remove worktrees, overlays, locks, configuration, or credentials. Manage `~/.codex/sessions` separately because it is shared with Codex activity outside this workflow.
+This does not remove worktrees, overlays, locks, configuration, or credentials. Manage `~/.codex/sessions` and `~/.claude/projects` separately because they are shared with Codex and Claude Code activity outside this workflow.
 
-The installed package is read-only, but agent containers receive writable worktrees, network access, and `GH_TOKEN`. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes. Host Git, recovery, and cleanup use absolute host paths; prompts and dependency mounts use `/home/agent/workspace/...` paths.
+The installed package is read-only, but agent containers receive writable worktrees, network access, `GH_TOKEN`, and a copy of each login the configuration uses. Users remain responsible for token scope, Docker trust, project Dockerfiles, network exposure, and agent-generated changes. Host Git, recovery, and cleanup use absolute host paths; prompts and dependency mounts use `/home/agent/workspace/...` paths.
 
 ## Upgrade
 

@@ -4,7 +4,17 @@ import { z } from "zod";
 
 import { getErrorCode } from "./error-code.ts";
 
-export type AgentRoleConfig = { model: string; effort: string };
+const agentProviders = ["codex", "claude-code"] as const;
+
+export type AgentProvider = (typeof agentProviders)[number];
+
+const claudeCodeEfforts = ["low", "medium", "high", "xhigh", "max"] as const;
+
+type ClaudeCodeEffort = (typeof claudeCodeEfforts)[number];
+
+export type AgentRoleConfig =
+  | { agent: "codex"; model: string; effort: string }
+  | { agent: "claude-code"; model: string; effort: ClaudeCodeEffort };
 
 export type AgentConfig = {
   implementer: AgentRoleConfig;
@@ -13,19 +23,38 @@ export type AgentConfig = {
   finalSpecReviewer: AgentRoleConfig;
 };
 
-export type AgentEnvironment = { GH_TOKEN: string };
+export type AgentEnvironment = {
+  GH_TOKEN: string;
+  // Absent when neither the file nor the host environment sets a value.
+  CLAUDE_CODE_OAUTH_TOKEN?: string;
+};
+
+const agentEnvironmentKeys = ["GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] as const;
+
+type AgentEnvironmentKey = (typeof agentEnvironmentKeys)[number];
 
 function getRunnerConfigPath(projectRoot: string): string {
   return path.join(projectRoot, ".sandcastle", "sandcastle.env");
 }
 
+const roleKeyPrefixes = [
+  "IMPLEMENTER",
+  "REVIEWER",
+  "REPORTER",
+  "FINAL_SPEC_REVIEWER",
+] as const;
+
 const runnerConfigKeys = [
+  "IMPLEMENTER_AGENT",
   "IMPLEMENTER_MODEL",
   "IMPLEMENTER_EFFORT",
+  "REVIEWER_AGENT",
   "REVIEWER_MODEL",
   "REVIEWER_EFFORT",
+  "REPORTER_AGENT",
   "REPORTER_MODEL",
   "REPORTER_EFFORT",
+  "FINAL_SPEC_REVIEWER_AGENT",
   "FINAL_SPEC_REVIEWER_MODEL",
   "FINAL_SPEC_REVIEWER_EFFORT",
   "MAX_ITERATIONS",
@@ -37,13 +66,18 @@ type OptionalRunnerConfigKey = (typeof optionalRunnerConfigKeys)[number];
 
 // loadRunnerConfig reports missing and empty keys with line-level context
 // first; this schema then gives the parsed values their type.
+const agentProviderSchema = z.enum(agentProviders);
 const runnerConfigSchema = z.object({
+  IMPLEMENTER_AGENT: agentProviderSchema,
   IMPLEMENTER_MODEL: z.string(),
   IMPLEMENTER_EFFORT: z.string(),
+  REVIEWER_AGENT: agentProviderSchema,
   REVIEWER_MODEL: z.string(),
   REVIEWER_EFFORT: z.string(),
+  REPORTER_AGENT: agentProviderSchema,
   REPORTER_MODEL: z.string(),
   REPORTER_EFFORT: z.string(),
+  FINAL_SPEC_REVIEWER_AGENT: agentProviderSchema,
   FINAL_SPEC_REVIEWER_MODEL: z.string(),
   FINAL_SPEC_REVIEWER_EFFORT: z.string(),
   MAX_ITERATIONS: z.string(),
@@ -60,6 +94,18 @@ function isRunnerConfigEntryKey(
   return [...runnerConfigKeys, ...optionalRunnerConfigKeys].some(
     (candidate) => candidate === key,
   );
+}
+
+function isAgentProvider(value: string): value is AgentProvider {
+  return agentProviders.some((provider) => provider === value);
+}
+
+function isClaudeCodeEffort(value: string): value is ClaudeCodeEffort {
+  return claudeCodeEfforts.some((effort) => effort === value);
+}
+
+function isAgentEnvironmentKey(key: string): key is AgentEnvironmentKey {
+  return agentEnvironmentKeys.some((candidate) => candidate === key);
 }
 
 function parseConfigValue(
@@ -111,6 +157,10 @@ export async function loadRunnerConfig(
   }
 
   const values = new Map<RunnerConfigKey | OptionalRunnerConfigKey, string>();
+  const lineNumbers = new Map<
+    RunnerConfigKey | OptionalRunnerConfigKey,
+    number
+  >();
 
   for (const [index, line] of contents.split(/\r?\n/).entries()) {
     const lineNumber = index + 1;
@@ -148,7 +198,14 @@ export async function loadRunnerConfig(
       );
     }
 
+    if (key.endsWith("_AGENT") && !isAgentProvider(value)) {
+      throw new Error(
+        `${runnerConfigPath}:${lineNumber}: ${key} must be one of ${agentProviders.join(", ")}.`,
+      );
+    }
+
     values.set(key, value);
+    lineNumbers.set(key, lineNumber);
   }
 
   const missingKeys = runnerConfigKeys.filter((key) => !values.has(key));
@@ -156,6 +213,21 @@ export async function loadRunnerConfig(
     throw new Error(
       `${runnerConfigPath} is missing required configuration: ${missingKeys.join(", ")}.`,
     );
+  }
+
+  // Codex effort stays unchecked so that new model/effort pairs need no
+  // runner release; Sandcastle types Claude Code effort as a closed set.
+  for (const prefix of roleKeyPrefixes) {
+    const agentKey = `${prefix}_AGENT` as const;
+    const effortKey = `${prefix}_EFFORT` as const;
+    if (
+      values.get(agentKey) === "claude-code" &&
+      !isClaudeCodeEffort(values.get(effortKey) ?? "")
+    ) {
+      throw new Error(
+        `${runnerConfigPath}:${lineNumbers.get(effortKey)}: ${effortKey} must be one of ${claudeCodeEfforts.join(", ")} when ${agentKey} is claude-code.`,
+      );
+    }
   }
 
   return runnerConfigSchema.parse(Object.fromEntries(values));
@@ -180,24 +252,45 @@ export function requireMaxIterations(
   return maxIterations;
 }
 
+function createRoleConfig(
+  agent: AgentProvider,
+  model: string,
+  effort: string,
+): AgentRoleConfig {
+  if (agent === "codex") {
+    return { agent, model, effort };
+  }
+  // loadRunnerConfig has already rejected this with the file and line.
+  if (!isClaudeCodeEffort(effort)) {
+    throw new Error(
+      `Claude Code effort must be one of ${claudeCodeEfforts.join(", ")}.`,
+    );
+  }
+  return { agent, model, effort };
+}
+
 export function getAgentConfig(runnerConfig: RunnerConfig): AgentConfig {
   return {
-    implementer: {
-      model: runnerConfig.IMPLEMENTER_MODEL,
-      effort: runnerConfig.IMPLEMENTER_EFFORT,
-    },
-    reviewer: {
-      model: runnerConfig.REVIEWER_MODEL,
-      effort: runnerConfig.REVIEWER_EFFORT,
-    },
-    reporter: {
-      model: runnerConfig.REPORTER_MODEL,
-      effort: runnerConfig.REPORTER_EFFORT,
-    },
-    finalSpecReviewer: {
-      model: runnerConfig.FINAL_SPEC_REVIEWER_MODEL,
-      effort: runnerConfig.FINAL_SPEC_REVIEWER_EFFORT,
-    },
+    implementer: createRoleConfig(
+      runnerConfig.IMPLEMENTER_AGENT,
+      runnerConfig.IMPLEMENTER_MODEL,
+      runnerConfig.IMPLEMENTER_EFFORT,
+    ),
+    reviewer: createRoleConfig(
+      runnerConfig.REVIEWER_AGENT,
+      runnerConfig.REVIEWER_MODEL,
+      runnerConfig.REVIEWER_EFFORT,
+    ),
+    reporter: createRoleConfig(
+      runnerConfig.REPORTER_AGENT,
+      runnerConfig.REPORTER_MODEL,
+      runnerConfig.REPORTER_EFFORT,
+    ),
+    finalSpecReviewer: createRoleConfig(
+      runnerConfig.FINAL_SPEC_REVIEWER_AGENT,
+      runnerConfig.FINAL_SPEC_REVIEWER_MODEL,
+      runnerConfig.FINAL_SPEC_REVIEWER_EFFORT,
+    ),
   };
 }
 
@@ -218,7 +311,7 @@ export async function loadAgentEnvironment(
     throw error;
   }
 
-  const values = new Map<string, string>();
+  const values = new Map<AgentEnvironmentKey, string>();
   for (const [index, line] of contents.split(/\r?\n/).entries()) {
     const lineNumber = index + 1;
     const trimmedLine = line.trim();
@@ -233,9 +326,9 @@ export async function loadAgentEnvironment(
         `${agentEnvironmentPath}:${lineNumber}: expected a KEY=value assignment.`,
       );
     }
-    if (key !== "GH_TOKEN") {
+    if (!isAgentEnvironmentKey(key)) {
       throw new Error(
-        `${agentEnvironmentPath}:${lineNumber}: unsupported agent environment key ${key}. Only GH_TOKEN is supported; remove ${key} before running Sandcastle.`,
+        `${agentEnvironmentPath}:${lineNumber}: unsupported agent environment key ${key}. Only ${agentEnvironmentKeys.join(" and ")} are supported; remove ${key} before running Sandcastle.`,
       );
     }
     if (values.has(key)) {
@@ -260,18 +353,31 @@ export async function loadAgentEnvironment(
     );
   }
 
-  const fileGhToken = values.get("GH_TOKEN") ?? "";
-  const hostGhToken = process.env.GH_TOKEN ?? "";
-  let ghToken: string | undefined;
-  if (fileGhToken.trim() !== "") {
-    ghToken = fileGhToken;
-  } else if (hostGhToken.trim() !== "") {
-    ghToken = hostGhToken;
-  }
+  const ghToken = resolveCredential(values, "GH_TOKEN");
   if (ghToken === undefined) {
     throw new Error(
       `${agentEnvironmentPath} declares GH_TOKEN, but no usable credential was provided in the file or host environment.`,
     );
   }
-  return { GH_TOKEN: ghToken };
+  // Optional: Claude Code can log in from ~/.claude instead.
+  const claudeCodeOAuthToken = resolveCredential(
+    values,
+    "CLAUDE_CODE_OAUTH_TOKEN",
+  );
+  return claudeCodeOAuthToken === undefined
+    ? { GH_TOKEN: ghToken }
+    : { GH_TOKEN: ghToken, CLAUDE_CODE_OAUTH_TOKEN: claudeCodeOAuthToken };
+}
+
+// A non-blank value in .sandcastle/.env wins; otherwise a non-blank host value.
+function resolveCredential(
+  fileValues: ReadonlyMap<AgentEnvironmentKey, string>,
+  key: AgentEnvironmentKey,
+): string | undefined {
+  const fileValue = fileValues.get(key) ?? "";
+  if (fileValue.trim() !== "") {
+    return fileValue;
+  }
+  const hostValue = process.env[key] ?? "";
+  return hostValue.trim() === "" ? undefined : hostValue;
 }

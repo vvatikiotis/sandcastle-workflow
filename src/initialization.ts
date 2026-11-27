@@ -13,30 +13,52 @@ const ignoreContents = [
   "",
 ].join("\n");
 
+const roleExamples = [
+  { prefix: "IMPLEMENTER", role: "Implementer" },
+  { prefix: "REVIEWER", role: "Reviewer" },
+  { prefix: "REPORTER", role: "Reporter" },
+  { prefix: "FINAL_SPEC_REVIEWER", role: "Final Spec Reviewer" },
+] as const;
+
 const runnerConfigExample = [
   "# Runner-only agent configuration. These values are not forwarded to agents.",
-  "IMPLEMENTER_MODEL=",
-  "IMPLEMENTER_EFFORT=",
-  "REVIEWER_MODEL=",
-  "REVIEWER_EFFORT=",
-  "REPORTER_MODEL=",
-  "REPORTER_EFFORT=",
-  "FINAL_SPEC_REVIEWER_MODEL=",
-  "FINAL_SPEC_REVIEWER_EFFORT=",
+  "# Every key is required except DOCKER_IMAGE; set each value explicitly.",
+  ...roleExamples.flatMap(({ prefix, role }) => [
+    "",
+    `# ${role} agent: codex or claude-code. Example: ${prefix}_AGENT=codex`,
+    `${prefix}_AGENT=`,
+    `# ${role} model, a model name that agent accepts. Example: ${prefix}_MODEL=gpt-6.2-sol (codex) or ${prefix}_MODEL=claude-opus-5-5 (claude-code)`,
+    `${prefix}_MODEL=`,
+    `# ${role} effort: low, medium, high, xhigh, or max for claude-code; any effort the model accepts for codex. Example: ${prefix}_EFFORT=high`,
+    `${prefix}_EFFORT=`,
+  ]),
+  "",
+  "# Workflow iterations per run, each integrating at most one issue: a positive integer. Example: MAX_ITERATIONS=3",
   "MAX_ITERATIONS=",
   "",
-  "# Optional Docker image reference. When absent, Sandcastle derives sandcastle:<project>-v<package-version>.",
-  "# DOCKER_IMAGE=sandcastle:<project>-v<package-version>",
+  "# Optional Docker image reference: any image name and tag. When absent, Sandcastle derives",
+  "# sandcastle:<project>-v<package-version>. Example: DOCKER_IMAGE=sandcastle:my-project",
+  "# DOCKER_IMAGE=",
   "",
 ].join("\n");
 
 const agentEnvironmentExample = [
-  "# GitHub personal access token forwarded to agents for GitHub Issues access.",
+  "# Agent credentials. Only GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN are supported;",
+  "# any other key stops normal-run preflight.",
+  "",
+  "# Required: GitHub personal access token forwarded to agents for GitHub Issues access.",
   "# Create a fine-grained token: https://github.com/settings/personal-access-tokens/new",
   "# Required repository permissions: Issues (Read and write) and Metadata (Read)",
   "# Leave empty to use a non-empty GH_TOKEN from the host environment.",
-  "# Additional keys are unsupported and stop normal-run preflight.",
+  "# Example: GH_TOKEN=github_pat_...",
   "GH_TOKEN=",
+  "",
+  "# Optional: Claude Code login token from `claude setup-token`, used when a role runs claude-code.",
+  "# When empty, Sandcastle uses a non-empty CLAUDE_CODE_OAUTH_TOKEN from the host environment,",
+  "# and otherwise the ~/.claude/.credentials.json login. On macOS, where Claude Code keeps its",
+  "# login in the Keychain, set this token.",
+  "# Example: CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...",
+  "CLAUDE_CODE_OAUTH_TOKEN=",
   "",
 ].join("\n");
 
@@ -158,7 +180,7 @@ export function reportInitialization(
     "1. Copy .sandcastle/sandcastle.env.example to .sandcastle/sandcastle.env and choose every runner value."
   );
   console.log(
-    "2. Copy .sandcastle/.env.example to .sandcastle/.env and set GH_TOKEN before launching agents."
+    "2. Copy .sandcastle/.env.example to .sandcastle/.env and set GH_TOKEN, and CLAUDE_CODE_OAUTH_TOKEN when a role runs claude-code, before launching agents."
   );
   console.log(
     "3. Configure the GitHub relationship skill project-locally before using an agent to publish spec children."
