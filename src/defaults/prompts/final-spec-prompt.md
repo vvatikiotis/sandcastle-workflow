@@ -20,9 +20,11 @@ Replace `<short message>` with a concise description. Comments about gaps, triag
 
    Treat this native relationship list as authoritative. Read every direct sub-issue and every ADR linked from the specification or its children.
 
+   `HEAD` is the integrated result: the Base Branch after every child integrated.
+
 2. **Check readiness:** continue only when every native direct sub-issue is closed. If any remains open, leave GitHub state unchanged and use the `not-ready` outcome. The phase detail must list the open child issue IDs and required follow-up.
 
-3. **Review spec conformance:** map every specification requirement to completed child work and the integrated result. Identify missing, partial, incorrect, or contradictory behavior. Complete this axis when every specification requirement is accounted for by evidence from the children and repository.
+3. **Review spec conformance:** map every specification requirement to evidence at `HEAD`: a file, test, or commit. Find a child's commits with `git log --grep '#<n>:'`. Identify missing, partial, incorrect, or contradictory behavior that materially changes the specified behavior. Complete this axis when every requirement cites evidence or is recorded as a gap.
 
 4. **Review domain consistency:** compare the integrated result with the specification's terminology, concepts, ownership boundaries, and `GLOSSARY.md` when present. Record only mismatches that materially change the specified domain behavior or boundary.
 
